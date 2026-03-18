@@ -15,6 +15,7 @@ let proximoId  = 3;
 let modoEdicao = false;
 let idAtivo    = null;
 let viewAtual  = "mapa";
+let pz         = null;
 
 /* ── PERSISTÊNCIA ── */
 function salvarStorage() {
@@ -80,17 +81,15 @@ function atualizarStats() {
 /* ── VIEWS ── */
 function setView(v) {
   viewAtual = v;
-  document.getElementById("viewMapa").classList.toggle("hidden", v !== "mapa");
+  document.getElementById("viewMapa").classList.toggle("hidden",  v !== "mapa");
   document.getElementById("viewLista").classList.toggle("hidden", v !== "lista");
   document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
   event?.currentTarget?.classList.add("active");
-
   document.getElementById("viewTitle").textContent =
     v === "mapa" ? "Mapa de Extintores" : "Lista de Extintores";
   document.getElementById("viewSub").textContent =
     v === "mapa" ? "Galpão A · clique num extintor para detalhes"
                  : `${Object.keys(dados).length} extintores cadastrados`;
-
   if (v === "lista") renderizarLista();
 }
 
@@ -114,35 +113,38 @@ function renderPonto(id) {
   div.style.top  = pos.top;
   div.style.left = pos.left;
 
+  // Tooltip
   const tt = document.createElement("div");
-  tt.className = "ttip";
+  tt.className   = "ttip";
   tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
   div.appendChild(tt);
 
-  /* Clique (sem edição) → abre painel */
+  // Clique normal → abre painel
   div.addEventListener("click", e => {
     if (modoEdicao) return;
     e.stopPropagation();
     abrirPainel(id);
   });
 
-  /* Drag (modo edição) — closure por ponto, sem estado global */
+  // Drag no modo edição (escuta no próprio ponto, sem panzoom no caminho)
   div.addEventListener("mousedown", e => {
     if (!modoEdicao) return;
     e.stopPropagation();
     e.preventDefault();
 
-    const s  = pz.getTransform().scale;
-    const r  = document.getElementById("mapa").getBoundingClientRect();
-    const ox = (e.clientX - r.left) / s - parseFloat(div.style.left);
-    const oy = (e.clientY - r.top)  / s - parseFloat(div.style.top);
+    const mapaEl = document.getElementById("mapa");
+    // Usa a escala atual do panzoom (mesmo com panzoom pausado, getTransform() funciona)
+    const escala = pz ? pz.getTransform().scale : 1;
+    const rect   = mapaEl.getBoundingClientRect();
+    const ox     = (e.clientX - rect.left) / escala - parseFloat(div.style.left);
+    const oy     = (e.clientY - rect.top)  / escala - parseFloat(div.style.top);
 
     document.body.style.userSelect = "none";
 
     function onMove(ev) {
-      const rr = document.getElementById("mapa").getBoundingClientRect();
-      div.style.left = ((ev.clientX - rr.left) / s - ox) + "px";
-      div.style.top  = ((ev.clientY - rr.top)  / s - oy) + "px";
+      const r2 = mapaEl.getBoundingClientRect();
+      div.style.left = ((ev.clientX - r2.left) / escala - ox) + "px";
+      div.style.top  = ((ev.clientY - r2.top)  / escala - oy) + "px";
     }
     function onUp() {
       posicoes[id] = { top: div.style.top, left: div.style.left };
@@ -152,7 +154,6 @@ function renderPonto(id) {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup",   onUp);
     }
-
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup",   onUp);
   });
@@ -160,31 +161,44 @@ function renderPonto(id) {
   document.getElementById("mapa").appendChild(div);
 }
 
-/* ── ADICIONAR EXTINTOR clicando no fundo do mapa ── */
-let _addStart = null;
+/* ── OVERLAY DE EDIÇÃO ── 
+   Um div transparente sobre o mapa que captura cliques no fundo
+   sem brigar com o panzoom (que fica desativado no modo edição).
+*/
+function criarOverlay() {
+  let overlay = document.getElementById("editOverlay");
+  if (overlay) return overlay;
 
-document.getElementById("mapaContainer").addEventListener("mousedown", e => {
-  if (!modoEdicao || e.target.closest(".ponto")) return;
-  _addStart = { x: e.clientX, y: e.clientY };
-});
+  overlay = document.createElement("div");
+  overlay.id = "editOverlay";
+  overlay.style.cssText = `
+    position: absolute; inset: 0; z-index: 5;
+    cursor: crosshair; display: none;
+  `;
 
-document.getElementById("mapaContainer").addEventListener("mouseup", e => {
-  if (!modoEdicao || !_addStart) return;
-  if (e.target.closest(".ponto")) { _addStart = null; return; }
+  let startX, startY;
 
-  const dist = Math.hypot(e.clientX - _addStart.x, e.clientY - _addStart.y);
-  const cx = _addStart.x, cy = _addStart.y;
-  _addStart = null;
+  overlay.addEventListener("mousedown", e => {
+    startX = e.clientX; startY = e.clientY;
+  });
 
-  if (dist > 5) return; // foi pan, não clique
+  overlay.addEventListener("mouseup", e => {
+    if (startX === undefined) return;
+    const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
+    if (dist > 6) { startX = undefined; return; } // foi pan
 
-  const s = pz.getTransform().scale;
-  const r = document.getElementById("mapa").getBoundingClientRect();
-  adicionarExtintor(
-    Math.round((cx - r.left) / s),
-    Math.round((cy - r.top)  / s)
-  );
-});
+    const escala = pz ? pz.getTransform().scale : 1;
+    const mapa   = document.getElementById("mapa");
+    const rect   = mapa.getBoundingClientRect();
+    const x      = Math.round((startX - rect.left) / escala);
+    const y      = Math.round((startY - rect.top)  / escala);
+    startX = undefined;
+    adicionarExtintor(x, y);
+  });
+
+  document.getElementById("mapaContainer").appendChild(overlay);
+  return overlay;
+}
 
 function adicionarExtintor(x, y) {
   const id = proximoId++;
@@ -273,40 +287,23 @@ function renderizarLista(filtro = "") {
   const c   = document.getElementById("listaContainer");
   const ids = Object.keys(dados).filter(id => {
     if (!filtro) return true;
-    const ext = dados[id];
-    const f   = filtro.toLowerCase();
-    return String(id).includes(f)
-        || ext.tipo.toLowerCase().includes(f)
-        || ext.setor.toLowerCase().includes(f);
+    const ext = dados[id]; const f = filtro.toLowerCase();
+    return String(id).includes(f) || ext.tipo.toLowerCase().includes(f) || ext.setor.toLowerCase().includes(f);
   });
-
   if (ids.length === 0) {
     c.innerHTML = `<div style="color:var(--text3);font-size:14px;padding:20px">Nenhum extintor encontrado.</div>`;
     return;
   }
-
   c.innerHTML = ids.sort((a,b)=>+a-+b).map(id => {
-    const ext    = dados[id];
-    const status = calcularStatus(ext.validade);
-    const dias   = ext.validade ? diasRestantes(ext.validade) : null;
-    const diasTx = dias === null ? "—"
-                 : dias < 0     ? `${Math.abs(dias)}d vencido`
-                 : dias === 0   ? "Hoje!"
-                                : `${dias}d`;
-    return `
-      <div class="lista-card ${status}" onclick="abrirPainelLista(${id})">
-        <div class="lc-header">
-          <span class="lc-id">#${id}</span>
-          <span class="lc-badge ${status}">${statusLabel(status)}</span>
-        </div>
-        <div class="lc-tipo">${ext.tipo}</div>
-        <div class="lc-setor">${ext.setor}</div>
-        <div class="lc-divider"></div>
-        <div>
-          <span class="lc-validade">Val. ${ext.validade || "—"}</span>
-          <span class="lc-dias ${status}">${diasTx}</span>
-        </div>
-      </div>`;
+    const ext = dados[id]; const status = calcularStatus(ext.validade);
+    const dias = ext.validade ? diasRestantes(ext.validade) : null;
+    const diasTx = dias === null ? "—" : dias < 0 ? `${Math.abs(dias)}d vencido` : dias === 0 ? "Hoje!" : `${dias}d`;
+    return `<div class="lista-card ${status}" onclick="abrirPainelLista(${id})">
+      <div class="lc-header"><span class="lc-id">#${id}</span><span class="lc-badge ${status}">${statusLabel(status)}</span></div>
+      <div class="lc-tipo">${ext.tipo}</div><div class="lc-setor">${ext.setor}</div>
+      <div class="lc-divider"></div>
+      <div><span class="lc-validade">Val. ${ext.validade || "—"}</span><span class="lc-dias ${status}">${diasTx}</span></div>
+    </div>`;
   }).join("");
 }
 
@@ -324,32 +321,34 @@ function filtrarLista(v) {
 /* ── MODO EDIÇÃO ── */
 function toggleEdicao() {
   modoEdicao = !modoEdicao;
-  const btn   = document.getElementById("btnEdicao");
-  const badge = document.getElementById("modoEdBadge");
-  const hint  = document.getElementById("addHint");
-
-  btn.classList.toggle("ativo", modoEdicao);
-  badge.classList.toggle("hidden", !modoEdicao);
-  if (hint) hint.classList.toggle("hidden", !modoEdicao);
+  document.getElementById("btnEdicao").classList.toggle("ativo", modoEdicao);
+  document.getElementById("modoEdBadge").classList.toggle("hidden", !modoEdicao);
   document.getElementById("mapaContainer").classList.toggle("modo-adicionar", modoEdicao);
 
-  fecharPainel();
-  toast(
-    modoEdicao ? "Modo edição ativo — arraste pontos ou clique no mapa para adicionar"
-               : "Modo edição desativado",
-    modoEdicao ? "warn" : "ok"
-  );
+  const hint    = document.getElementById("addHint");
+  const overlay = criarOverlay();
+
+  if (modoEdicao) {
+    // Desativa panzoom completamente para os eventos chegarem livres
+    pz.setOptions({ disablePan: true });
+    overlay.style.display = "block";
+    if (hint) hint.classList.remove("hidden");
+    fecharPainel();
+    toast("Modo edição ativo — arraste pontos ou clique no mapa para adicionar", "warn");
+  } else {
+    pz.setOptions({ disablePan: false });
+    overlay.style.display = "none";
+    if (hint) hint.classList.add("hidden");
+    toast("Modo edição desativado", "ok");
+  }
 }
 
 /* ── ZOOM ── */
-let pz;
 function iniciarPanzoom() {
-  const el = document.getElementById("mapa");
-  pz = Panzoom(el, {
-    maxScale:     5,
-    minScale:     0.4,
-    contain:      "outside",
-    excludeClass: "ponto"   // CORREÇÃO PRINCIPAL: panzoom não captura eventos nos pontos
+  pz = Panzoom(document.getElementById("mapa"), {
+    maxScale: 5,
+    minScale: 0.4,
+    contain:  "outside"
   });
   document.getElementById("mapaContainer").addEventListener("wheel", e => {
     pz.zoomWithWheel(e);
@@ -364,10 +363,7 @@ function toast(msg, tipo = "") {
   el.className   = `toast ${tipo}`;
   el.textContent = msg;
   c.appendChild(el);
-  setTimeout(() => {
-    el.classList.add("fade-out");
-    setTimeout(() => el.remove(), 350);
-  }, 3000);
+  setTimeout(() => { el.classList.add("fade-out"); setTimeout(() => el.remove(), 350); }, 3000);
 }
 
 /* ── EXPORTAR ── */
@@ -375,15 +371,13 @@ function exportarRelatorio() {
   const hoje = new Date().toLocaleDateString("pt-BR");
   let txt = `RELATÓRIO DE EXTINTORES — ${hoje}\n${"─".repeat(50)}\n\n`;
   Object.keys(dados).sort((a,b)=>+a-+b).forEach(id => {
-    const ext = dados[id];
-    const s   = calcularStatus(ext.validade);
-    const d   = diasRestantes(ext.validade);
-    const sx  = s === "verde" ? "✓ EM DIA" : s === "amarelo" ? "⚠ VENCENDO" : "✕ VENCIDO";
+    const ext = dados[id]; const s = calcularStatus(ext.validade); const d = diasRestantes(ext.validade);
+    const sx = s === "verde" ? "✓ EM DIA" : s === "amarelo" ? "⚠ VENCENDO" : "✕ VENCIDO";
     const dTx = d >= 0 ? `${d}d restantes` : `${Math.abs(d)}d vencido`;
     txt += `#${String(id).padStart(3,"0")} | ${ext.tipo.padEnd(18)} | ${ext.setor.padEnd(15)} | Val: ${ext.validade || "—"} | ${sx} (${dTx})\n`;
   });
-  const a    = document.createElement("a");
-  a.href     = URL.createObjectURL(new Blob([txt], { type: "text/plain;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain;charset=utf-8" }));
   a.download = `extintores-${hoje.replace(/\//g,"-")}.txt`;
   a.click();
   toast("Relatório exportado!", "ok");
