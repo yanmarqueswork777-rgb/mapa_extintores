@@ -9,25 +9,38 @@ const dados = {
   }
 };
 
+function calcularStatus(dataValidade) {
+  const hoje = new Date();
+  const validade = new Date(dataValidade);
+
+  const diffDias = (validade - hoje) / (1000 * 60 * 60 * 24);
+
+  if (diffDias < 0) return "vermelho";
+  if (diffDias <= 30) return "amarelo";
+  return "verde";
+}
+
+function atualizarCores() {
+  Object.keys(dados).forEach(id => {
+    const status = calcularStatus(dados[id].validade);
+    const ponto = document.getElementById("p" + id);
+
+    ponto.classList.remove("verde", "amarelo", "vermelho");
+    ponto.classList.add(status);
+  });
+}
+
 function abrir(id) {
   const info = dados[id];
-
-  const hoje = new Date();
-  const validade = new Date(info.validade);
-
-  let status = "OK";
-
-  if (validade < hoje) {
-    status = "VENCIDO";
-  }
+  const status = calcularStatus(info.validade);
 
   const box = document.getElementById("infoBox");
 
   box.innerHTML = `
-    <b>Extintor ${id}</b><br>
+    <h3>Extintor ${id}</h3>
     Tipo: ${info.tipo}<br>
     Validade: ${info.validade}<br>
-    Status: ${status}<br><br>
+    Status: ${status.toUpperCase()}<br>
     <button onclick="trocar(${id})">Trocar</button>
   `;
 
@@ -35,5 +48,13 @@ function abrir(id) {
 }
 
 function trocar(id) {
-  alert("Extintor " + id + " atualizado!");
+  const novaData = prompt("Nova validade (YYYY-MM-DD):");
+
+  if (novaData) {
+    dados[id].validade = novaData;
+    atualizarCores();
+    alert("Atualizado!");
+  }
 }
+
+atualizarCores();
