@@ -2,28 +2,37 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Mapa de Extintores</title>
+  <title>Controle de Extintores</title>
   <link rel="stylesheet" href="style.css">
+
+  <!-- Zoom -->
+  <script src="https://unpkg.com/@panzoom/panzoom/dist/panzoom.min.js"></script>
 </head>
 <body>
 
 <h2>🔥 Controle de Extintores</h2>
 
 <div class="topo">
-  <select id="galpaoSelect">
-    <option value="A">Galpão A</option>
-  </select>
+  <button onclick="toggleEdicao()">Modo edição</button>
+  <button onclick="salvar()">Salvar posições</button>
 </div>
 
-<div class="mapa">
-  <img src="imagens/galpaoA.png">
+<div class="container">
 
-  <div id="p1" class="ponto" style="top: 100px; left: 200px;" onclick="abrir(1)"></div>
-  <div id="p2" class="ponto" style="top: 250px; left: 400px;" onclick="abrir(2)"></div>
+  <div id="mapaContainer">
+    <div id="mapa">
+
+      <img src="imagens/galpaoA.png">
+
+      <div id="p1" class="ponto" style="top: 100px; left: 200px;" onclick="abrir(1)"></div>
+      <div id="p2" class="ponto" style="top: 250px; left: 400px;" onclick="abrir(2)"></div>
+
+    </div>
+  </div>
+
+  <div id="infoBox" class="hidden"></div>
 
 </div>
-
-<div id="infoBox" class="hidden"></div>
 
 <script src="script.js"></script>
 
