@@ -35,21 +35,23 @@ function carregarStorage() {
 
 /* ── STATUS ── */
 function calcularStatus(val) {
+  if (!val) return "vermelho";
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const v    = new Date(val + "T00:00:00");
-  const diff = Math.ceil((v - hoje) / 86400000);
+  const diff = Math.ceil((new Date(val + "T00:00:00") - hoje) / 86400000);
   if (diff < 0)   return "vermelho";
   if (diff <= 30) return "amarelo";
   return "verde";
 }
 function diasRestantes(val) {
+  if (!val) return -999;
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   return Math.ceil((new Date(val + "T00:00:00") - hoje) / 86400000);
 }
 function diasLabel(val) {
   const d = diasRestantes(val);
-  if (d < 0)  return `${Math.abs(d)} dias vencido`;
-  if (d === 0) return "Vence hoje!";
+  if (d === -999) return "Sem validade";
+  if (d < 0)     return `${Math.abs(d)} dias vencido`;
+  if (d === 0)   return "Vence hoje!";
   return `${d} dias restantes`;
 }
 function statusLabel(s) {
@@ -86,12 +88,13 @@ function setView(v) {
   document.getElementById("viewTitle").textContent =
     v === "mapa" ? "Mapa de Extintores" : "Lista de Extintores";
   document.getElementById("viewSub").textContent =
-    v === "mapa" ? "Galpão A · clique num extintor para detalhes" : `${Object.keys(dados).length} extintores cadastrados`;
+    v === "mapa" ? "Galpão A · clique num extintor para detalhes"
+                 : `${Object.keys(dados).length} extintores cadastrados`;
 
   if (v === "lista") renderizarLista();
 }
 
-/* ── RENDERIZAR MAPA ── */
+/* ── RENDERIZAR PONTOS ── */
 function renderizarPontos() {
   document.querySelectorAll(".ponto").forEach(p => p.remove());
   Object.keys(dados).forEach(id => renderPonto(id));
@@ -101,83 +104,85 @@ function renderizarPontos() {
 function renderPonto(id) {
   const ext    = dados[id];
   const pos    = posicoes[id];
+  if (!pos) return;
   const status = calcularStatus(ext.validade);
   const dias   = diasRestantes(ext.validade);
 
   const div = document.createElement("div");
   div.id        = "p" + id;
   div.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
-  div.style.top    = pos.top;
-  div.style.left   = pos.left;
-  div.style.touchAction = "none"; // necessário para pointer capture
+  div.style.top  = pos.top;
+  div.style.left = pos.left;
 
   const tt = document.createElement("div");
   tt.className = "ttip";
-  tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Vence hoje!" : dias + "d"}`;
+  tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
   div.appendChild(tt);
 
-  // Clique normal para abrir painel
+  /* Clique (sem edição) → abre painel */
   div.addEventListener("click", e => {
-    if (!modoEdicao) { e.stopPropagation(); abrirPainel(id); }
+    if (modoEdicao) return;
+    e.stopPropagation();
+    abrirPainel(id);
   });
 
-  // Drag via Pointer Capture — não conflita com panzoom
-  div.addEventListener("pointerdown", e => {
+  /* Drag (modo edição) — closure por ponto, sem estado global */
+  div.addEventListener("mousedown", e => {
     if (!modoEdicao) return;
     e.stopPropagation();
     e.preventDefault();
-    div.setPointerCapture(e.pointerId); // captura todos os eventos no elemento
-    const s = pz.getTransform().scale;
-    const r = document.getElementById("mapa").getBoundingClientRect();
-    drag.ativo = true;
-    drag.el    = div;
-    drag.id    = id;
-    drag.ox    = (e.clientX - r.left) / s - parseFloat(div.style.left);
-    drag.oy    = (e.clientY - r.top)  / s - parseFloat(div.style.top);
+
+    const s  = pz.getTransform().scale;
+    const r  = document.getElementById("mapa").getBoundingClientRect();
+    const ox = (e.clientX - r.left) / s - parseFloat(div.style.left);
+    const oy = (e.clientY - r.top)  / s - parseFloat(div.style.top);
+
     document.body.style.userSelect = "none";
-  });
 
-  div.addEventListener("pointermove", e => {
-    if (!drag.ativo || drag.el !== div) return;
-    const s = pz.getTransform().scale;
-    const r = document.getElementById("mapa").getBoundingClientRect();
-    div.style.left = ((e.clientX - r.left) / s - drag.ox) + "px";
-    div.style.top  = ((e.clientY - r.top)  / s - drag.oy) + "px";
-  });
+    function onMove(ev) {
+      const rr = document.getElementById("mapa").getBoundingClientRect();
+      div.style.left = ((ev.clientX - rr.left) / s - ox) + "px";
+      div.style.top  = ((ev.clientY - rr.top)  / s - oy) + "px";
+    }
+    function onUp() {
+      posicoes[id] = { top: div.style.top, left: div.style.left };
+      salvarStorage();
+      toast("Posição salva", "ok");
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup",   onUp);
+    }
 
-  div.addEventListener("pointerup", e => {
-    if (!drag.ativo || drag.el !== div) return;
-    posicoes[id] = { top: div.style.top, left: div.style.left };
-    salvarStorage();
-    toast("Posição salva", "ok");
-    drag.ativo = false; drag.el = null; drag.id = null;
-    document.body.style.userSelect = "";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
   });
 
   document.getElementById("mapa").appendChild(div);
 }
 
-/* ── DRAG STATE ── */
-let drag = { ativo: false, el: null, id: null, ox: 0, oy: 0 };
+/* ── ADICIONAR EXTINTOR clicando no fundo do mapa ── */
+let _addStart = null;
 
-/* ── MAPA — adicionar clicando (mousedown+mouseup para evitar conflito com panzoom) ── */
-let addDown = null;
 document.getElementById("mapaContainer").addEventListener("mousedown", e => {
   if (!modoEdicao || e.target.closest(".ponto")) return;
-  addDown = { x: e.clientX, y: e.clientY };
+  _addStart = { x: e.clientX, y: e.clientY };
 });
 
 document.getElementById("mapaContainer").addEventListener("mouseup", e => {
-  if (!modoEdicao || !addDown || e.target.closest(".ponto")) { addDown = null; return; }
-  const dist = Math.hypot(e.clientX - addDown.x, e.clientY - addDown.y);
-  const pos  = { ...addDown };
-  addDown = null;
-  if (dist > 6) return; // foi um arrasto, não um clique
+  if (!modoEdicao || !_addStart) return;
+  if (e.target.closest(".ponto")) { _addStart = null; return; }
+
+  const dist = Math.hypot(e.clientX - _addStart.x, e.clientY - _addStart.y);
+  const cx = _addStart.x, cy = _addStart.y;
+  _addStart = null;
+
+  if (dist > 5) return; // foi pan, não clique
+
   const s = pz.getTransform().scale;
   const r = document.getElementById("mapa").getBoundingClientRect();
   adicionarExtintor(
-    Math.round((pos.x - r.left) / s),
-    Math.round((pos.y - r.top)  / s)
+    Math.round((cx - r.left) / s),
+    Math.round((cy - r.top)  / s)
   );
 });
 
@@ -202,8 +207,8 @@ function abrirPainel(id) {
   const ext    = dados[id];
   const status = calcularStatus(ext.validade);
 
-  document.getElementById("dpId").textContent   = `EXTINTOR #${id}`;
-  document.getElementById("dpNome").textContent  = ext.tipo;
+  document.getElementById("dpId").textContent  = `EXTINTOR #${id}`;
+  document.getElementById("dpNome").textContent = ext.tipo;
 
   const bar = document.getElementById("dpStatusBar");
   bar.className = `dp-status-bar s-${status}`;
@@ -211,9 +216,9 @@ function abrirPainel(id) {
   document.getElementById("dpStatusText").textContent = statusLabel(status);
   document.getElementById("dpDias").textContent       = ext.validade ? diasLabel(ext.validade) : "—";
 
-  document.getElementById("editSetor").value    = ext.setor   || "";
-  document.getElementById("editTipo").value     = ext.tipo    || "Pó Químico ABC";
-  document.getElementById("editValidade").value = ext.validade|| "";
+  document.getElementById("editSetor").value    = ext.setor    || "";
+  document.getElementById("editTipo").value     = ext.tipo     || "Pó Químico ABC";
+  document.getElementById("editValidade").value = ext.validade || "";
 
   document.getElementById("detailPanel").classList.remove("hidden");
 }
@@ -265,40 +270,47 @@ function removerExtintor() {
 
 /* ── LISTA ── */
 function renderizarLista(filtro = "") {
-  const c = document.getElementById("listaContainer");
+  const c   = document.getElementById("listaContainer");
   const ids = Object.keys(dados).filter(id => {
     if (!filtro) return true;
     const ext = dados[id];
     const f   = filtro.toLowerCase();
-    return String(id).includes(f) || ext.tipo.toLowerCase().includes(f) || ext.setor.toLowerCase().includes(f);
+    return String(id).includes(f)
+        || ext.tipo.toLowerCase().includes(f)
+        || ext.setor.toLowerCase().includes(f);
   });
 
-  c.innerHTML = ids.length === 0
-    ? `<div style="color:var(--text3);font-size:14px;padding:20px">Nenhum extintor encontrado.</div>`
-    : ids.sort((a,b)=>+a-+b).map(id => {
-        const ext    = dados[id];
-        const status = calcularStatus(ext.validade);
-        const dias   = ext.validade ? diasRestantes(ext.validade) : null;
-        const diasTx = dias === null ? "—" : dias < 0 ? `${Math.abs(dias)}d vencido` : dias === 0 ? "Hoje!" : `${dias}d`;
-        return `
-          <div class="lista-card ${status}" onclick="abrirPainelLista(${id})">
-            <div class="lc-header">
-              <span class="lc-id">#${id}</span>
-              <span class="lc-badge ${status}">${statusLabel(status)}</span>
-            </div>
-            <div class="lc-tipo">${ext.tipo}</div>
-            <div class="lc-setor">${ext.setor}</div>
-            <div class="lc-divider"></div>
-            <div>
-              <span class="lc-validade">Val. ${ext.validade || "—"}</span>
-              <span class="lc-dias ${status}">${diasTx}</span>
-            </div>
-          </div>`;
-      }).join("");
+  if (ids.length === 0) {
+    c.innerHTML = `<div style="color:var(--text3);font-size:14px;padding:20px">Nenhum extintor encontrado.</div>`;
+    return;
+  }
+
+  c.innerHTML = ids.sort((a,b)=>+a-+b).map(id => {
+    const ext    = dados[id];
+    const status = calcularStatus(ext.validade);
+    const dias   = ext.validade ? diasRestantes(ext.validade) : null;
+    const diasTx = dias === null ? "—"
+                 : dias < 0     ? `${Math.abs(dias)}d vencido`
+                 : dias === 0   ? "Hoje!"
+                                : `${dias}d`;
+    return `
+      <div class="lista-card ${status}" onclick="abrirPainelLista(${id})">
+        <div class="lc-header">
+          <span class="lc-id">#${id}</span>
+          <span class="lc-badge ${status}">${statusLabel(status)}</span>
+        </div>
+        <div class="lc-tipo">${ext.tipo}</div>
+        <div class="lc-setor">${ext.setor}</div>
+        <div class="lc-divider"></div>
+        <div>
+          <span class="lc-validade">Val. ${ext.validade || "—"}</span>
+          <span class="lc-dias ${status}">${diasTx}</span>
+        </div>
+      </div>`;
+  }).join("");
 }
 
 function abrirPainelLista(id) {
-  // troca pra mapa e abre painel
   setView("mapa");
   document.querySelectorAll(".nav-item")[0].classList.add("active");
   document.querySelectorAll(".nav-item")[1].classList.remove("active");
@@ -312,38 +324,50 @@ function filtrarLista(v) {
 /* ── MODO EDIÇÃO ── */
 function toggleEdicao() {
   modoEdicao = !modoEdicao;
-  const btn  = document.getElementById("btnEdicao");
+  const btn   = document.getElementById("btnEdicao");
   const badge = document.getElementById("modoEdBadge");
   const hint  = document.getElementById("addHint");
 
   btn.classList.toggle("ativo", modoEdicao);
   badge.classList.toggle("hidden", !modoEdicao);
-  hint?.classList.toggle("hidden", !modoEdicao);
+  if (hint) hint.classList.toggle("hidden", !modoEdicao);
   document.getElementById("mapaContainer").classList.toggle("modo-adicionar", modoEdicao);
 
   fecharPainel();
-  toast(modoEdicao ? "Modo edição ativo — arraste ou clique para adicionar" : "Modo edição desativado", modoEdicao ? "warn" : "ok");
+  toast(
+    modoEdicao ? "Modo edição ativo — arraste pontos ou clique no mapa para adicionar"
+               : "Modo edição desativado",
+    modoEdicao ? "warn" : "ok"
+  );
 }
 
 /* ── ZOOM ── */
 let pz;
 function iniciarPanzoom() {
   const el = document.getElementById("mapa");
-  pz = Panzoom(el, { maxScale: 5, minScale: 0.4, contain: "outside" });
+  pz = Panzoom(el, {
+    maxScale:     5,
+    minScale:     0.4,
+    contain:      "outside",
+    excludeClass: "ponto"   // CORREÇÃO PRINCIPAL: panzoom não captura eventos nos pontos
+  });
   document.getElementById("mapaContainer").addEventListener("wheel", e => {
-    if (!modoEdicao) pz.zoomWithWheel(e);
+    pz.zoomWithWheel(e);
   });
 }
 function resetZoom() { pz.reset(); }
 
 /* ── TOAST ── */
 function toast(msg, tipo = "") {
-  const c   = document.getElementById("toast-container");
-  const el  = document.createElement("div");
-  el.className = `toast ${tipo}`;
+  const c  = document.getElementById("toast-container");
+  const el = document.createElement("div");
+  el.className   = `toast ${tipo}`;
   el.textContent = msg;
   c.appendChild(el);
-  setTimeout(() => { el.classList.add("fade-out"); setTimeout(() => el.remove(), 350); }, 3000);
+  setTimeout(() => {
+    el.classList.add("fade-out");
+    setTimeout(() => el.remove(), 350);
+  }, 3000);
 }
 
 /* ── EXPORTAR ── */
@@ -355,10 +379,11 @@ function exportarRelatorio() {
     const s   = calcularStatus(ext.validade);
     const d   = diasRestantes(ext.validade);
     const sx  = s === "verde" ? "✓ EM DIA" : s === "amarelo" ? "⚠ VENCENDO" : "✕ VENCIDO";
-    txt += `#${id.padStart(3,"0")} | ${ext.tipo.padEnd(18)} | ${ext.setor.padEnd(15)} | Val: ${ext.validade} | ${sx} (${d >= 0 ? d + "d restantes" : Math.abs(d) + "d vencido"})\n`;
+    const dTx = d >= 0 ? `${d}d restantes` : `${Math.abs(d)}d vencido`;
+    txt += `#${String(id).padStart(3,"0")} | ${ext.tipo.padEnd(18)} | ${ext.setor.padEnd(15)} | Val: ${ext.validade || "—"} | ${sx} (${dTx})\n`;
   });
-  const a  = document.createElement("a");
-  a.href   = URL.createObjectURL(new Blob([txt], { type: "text/plain;charset=utf-8" }));
+  const a    = document.createElement("a");
+  a.href     = URL.createObjectURL(new Blob([txt], { type: "text/plain;charset=utf-8" }));
   a.download = `extintores-${hoje.replace(/\//g,"-")}.txt`;
   a.click();
   toast("Relatório exportado!", "ok");
