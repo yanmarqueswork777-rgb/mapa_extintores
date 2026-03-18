@@ -1,7 +1,8 @@
 /* ============================================================
-   FireMap — script.js
+   FireMap — script.js (versão corrigida)
    ============================================================ */
 
+/* ── ESTADO ── */
 let dados = {
   1: { tipo: "Pó Químico ABC", validade: "2026-05-10", setor: "Galpão A" },
   2: { tipo: "CO₂",            validade: "2026-03-25", setor: "Galpão A" }
@@ -15,6 +16,9 @@ let modoEdicao = false;
 let idAtivo    = null;
 let viewAtual  = "mapa";
 let pz         = null;
+
+// Flag para distinguir clique de arrasto
+let dragging = false;
 
 /* ── PERSISTÊNCIA ── */
 function salvarStorage() {
@@ -50,8 +54,8 @@ function diasRestantes(val) {
 function diasLabel(val) {
   const d = diasRestantes(val);
   if (d === -999) return "Sem validade";
-  if (d < 0)      return `${Math.abs(d)} dias vencido`;
-  if (d === 0)    return "Vence hoje!";
+  if (d < 0)     return `${Math.abs(d)} dias vencido`;
+  if (d === 0)   return "Vence hoje!";
   return `${d} dias restantes`;
 }
 function statusLabel(s) {
@@ -83,31 +87,14 @@ function setView(v) {
   document.getElementById("viewMapa").classList.toggle("hidden",  v !== "mapa");
   document.getElementById("viewLista").classList.toggle("hidden", v !== "lista");
   document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
-  event?.currentTarget?.classList.add("active");
+  // Se a função foi chamada por um evento, destaca o botão clicado
+  if (event?.currentTarget) event.currentTarget.classList.add("active");
   document.getElementById("viewTitle").textContent =
     v === "mapa" ? "Mapa de Extintores" : "Lista de Extintores";
   document.getElementById("viewSub").textContent =
     v === "mapa" ? "Galpão A · clique num extintor para detalhes"
                  : `${Object.keys(dados).length} extintores cadastrados`;
   if (v === "lista") renderizarLista();
-}
-
-/* ── PANZOOM: criar e destruir ── */
-function criarPanzoom() {
-  if (pz) return;
-  pz = Panzoom(document.getElementById("mapa"), {
-    maxScale: 5,
-    minScale: 0.4,
-    contain:  "outside"
-  });
-}
-function destruirPanzoom() {
-  if (!pz) return;
-  pz.destroy();
-  pz = null;
-}
-function resetZoom() {
-  if (pz) pz.reset();
 }
 
 /* ── RENDERIZAR PONTOS ── */
@@ -127,66 +114,137 @@ function renderPonto(id) {
   const div = document.createElement("div");
   div.id        = "p" + id;
   div.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
-  div.style.top    = pos.top;
-  div.style.left   = pos.left;
-  div.style.zIndex = "20";
+  div.style.top  = pos.top;
+  div.style.left = pos.left;
 
+  // Tooltip
   const tt = document.createElement("div");
   tt.className   = "ttip";
   tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
   div.appendChild(tt);
 
-  /* Clique (sem edição) → abre painel */
+  // Eventos de mouse e touch para drag (modo edição)
+  div.addEventListener("mousedown", onDragStart);
+  div.addEventListener("touchstart", onDragStart, { passive: false });
+
+  // Clique normal → abre painel (somente se não houve arrasto)
   div.addEventListener("click", e => {
     if (modoEdicao) return;
+    if (dragging) {
+      dragging = false; // impede que um clique após arrasto abra o painel
+      return;
+    }
     e.stopPropagation();
     abrirPainel(id);
-  });
-
-  /* Drag no modo edição */
-  div.addEventListener("mousedown", e => {
-    if (!modoEdicao) return;
-    e.stopPropagation();
-    e.preventDefault();
-
-    const mapaEl = document.getElementById("mapa");
-    const rect   = mapaEl.getBoundingClientRect();
-    const ox     = e.clientX - rect.left - parseFloat(div.style.left);
-    const oy     = e.clientY - rect.top  - parseFloat(div.style.top);
-
-    document.body.style.userSelect = "none";
-
-    function onMove(ev) {
-      const r = mapaEl.getBoundingClientRect();
-      div.style.left = (ev.clientX - r.left - ox) + "px";
-      div.style.top  = (ev.clientY - r.top  - oy) + "px";
-    }
-    function onUp() {
-      posicoes[id] = { top: div.style.top, left: div.style.left };
-      salvarStorage();
-      toast("Posição salva", "ok");
-      document.body.style.userSelect = "";
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup",   onUp);
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup",   onUp);
   });
 
   document.getElementById("mapa").appendChild(div);
 }
 
-/* ── ADICIONAR CLICANDO NO MAPA (modo edição) ── */
-document.getElementById("mapa").addEventListener("click", e => {
+/* ── DRAG (suporte mouse e touch) ── */
+function onDragStart(e) {
   if (!modoEdicao) return;
-  if (e.target.closest(".ponto")) return;
+  e.preventDefault();   // importante para touch
+  e.stopPropagation();
+
+  dragging = false;     // ainda não moveu
+
+  const ponto = e.currentTarget;
+  const id = ponto.id.substring(1); // remove 'p'
+
+  // Coordenadas do toque ou mouse
+  const clientX = e.clientX ?? e.touches[0].clientX;
+  const clientY = e.clientY ?? e.touches[0].clientY;
 
   const mapaEl = document.getElementById("mapa");
+  const escala = pz ? pz.getTransform().scale : 1;
   const rect   = mapaEl.getBoundingClientRect();
-  const x      = Math.round(e.clientX - rect.left);
-  const y      = Math.round(e.clientY - rect.top);
-  adicionarExtintor(x, y);
-});
+
+  // Offset dentro do ponto
+  const ox = (clientX - rect.left) / escala - parseFloat(ponto.style.left);
+  const oy = (clientY - rect.top)  / escala - parseFloat(ponto.style.top);
+
+  document.body.style.userSelect = "none";
+
+  function onMove(ev) {
+    dragging = true; // moveu, não será clique
+    ev.preventDefault();
+    const mvX = ev.clientX ?? ev.touches[0].clientX;
+    const mvY = ev.clientY ?? ev.touches[0].clientY;
+    const r2 = mapaEl.getBoundingClientRect();
+    ponto.style.left = ((mvX - r2.left) / escala - ox) + "px";
+    ponto.style.top  = ((mvY - r2.top)  / escala - oy) + "px";
+  }
+
+  function onUp() {
+    // Salva nova posição
+    posicoes[id] = { top: ponto.style.top, left: ponto.style.left };
+    salvarStorage();
+    toast("Posição salva", "ok");
+    document.body.style.userSelect = "";
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup",   onUp);
+    document.removeEventListener("touchmove", onMove);
+    document.removeEventListener("touchend",  onUp);
+    // Pequeno atraso para evitar clique após arrasto
+    setTimeout(() => { dragging = false; }, 100);
+  }
+
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup",   onUp);
+  document.addEventListener("touchmove", onMove, { passive: false });
+  document.addEventListener("touchend",  onUp);
+}
+
+/* ── OVERLAY DE EDIÇÃO ── */
+function criarOverlay() {
+  let overlay = document.getElementById("editOverlay");
+  if (overlay) return overlay;
+
+  overlay = document.createElement("div");
+  overlay.id = "editOverlay";
+  overlay.style.cssText = `
+    position: absolute; top:0; left:0; width:100%; height:100%;
+    z-index: 5; cursor: crosshair; display: none;
+    background: transparent; /* para teste: rgba(0,255,0,0.1) */
+  `;
+
+  let startX, startY;
+
+  overlay.addEventListener("mousedown", startOverlayDrag);
+  overlay.addEventListener("touchstart", startOverlayDrag, { passive: false });
+
+  function startOverlayDrag(e) {
+    e.preventDefault(); // importante para touch
+    startX = e.clientX ?? e.touches[0].clientX;
+    startY = e.clientY ?? e.touches[0].clientY;
+  }
+
+  overlay.addEventListener("mouseup", endOverlayDrag);
+  overlay.addEventListener("touchend", endOverlayDrag);
+
+  function endOverlayDrag(e) {
+    if (startX === undefined) return;
+    const endX = e.clientX ?? e.changedTouches[0].clientX;
+    const endY = e.clientY ?? e.changedTouches[0].clientY;
+    const dist = Math.hypot(endX - startX, endY - startY);
+    if (dist > 10) { // limite de 10px para considerar clique (evita arrasto)
+      startX = undefined;
+      return;
+    }
+
+    const escala = pz ? pz.getTransform().scale : 1;
+    const mapa   = document.getElementById("mapa");
+    const rect   = mapa.getBoundingClientRect();
+    const x      = Math.round((startX - rect.left) / escala);
+    const y      = Math.round((startY - rect.top)  / escala);
+    startX = undefined;
+    adicionarExtintor(x, y);
+  }
+
+  document.getElementById("mapaContainer").appendChild(overlay);
+  return overlay;
+}
 
 function adicionarExtintor(x, y) {
   const id = proximoId++;
@@ -312,25 +370,37 @@ function toggleEdicao() {
   document.getElementById("btnEdicao").classList.toggle("ativo", modoEdicao);
   document.getElementById("modoEdBadge").classList.toggle("hidden", !modoEdicao);
   document.getElementById("mapaContainer").classList.toggle("modo-adicionar", modoEdicao);
-  const hint = document.getElementById("addHint");
-  if (hint) hint.classList.toggle("hidden", !modoEdicao);
+
+  const hint    = document.getElementById("addHint");
+  const overlay = criarOverlay();
 
   if (modoEdicao) {
-    /* DESTRUIR panzoom — única forma garantida de liberar os eventos */
-    destruirPanzoom();
+    // Desativa o panzoom (impede movimento do mapa)
+    pz.setOptions({ disablePan: true });
+    overlay.style.display = "block";
+    if (hint) hint.classList.remove("hidden");
     fecharPainel();
     toast("Modo edição ativo — arraste pontos ou clique no mapa para adicionar", "warn");
   } else {
-    /* RECRIAR panzoom ao sair do modo edição */
-    criarPanzoom();
+    pz.setOptions({ disablePan: false });
+    overlay.style.display = "none";
+    if (hint) hint.classList.add("hidden");
     toast("Modo edição desativado", "ok");
   }
 }
 
-/* ── WHEEL ZOOM (funciona mesmo sem panzoom ativo) ── */
-document.getElementById("mapaContainer").addEventListener("wheel", e => {
-  if (pz) pz.zoomWithWheel(e);
-});
+/* ── ZOOM ── */
+function iniciarPanzoom() {
+  pz = Panzoom(document.getElementById("mapa"), {
+    maxScale: 5,
+    minScale: 0.4,
+    contain:  "outside"
+  });
+  document.getElementById("mapaContainer").addEventListener("wheel", e => {
+    pz.zoomWithWheel(e);
+  });
+}
+function resetZoom() { pz.reset(); }
 
 /* ── TOAST ── */
 function toast(msg, tipo = "") {
@@ -361,5 +431,5 @@ function exportarRelatorio() {
 
 /* ── INIT ── */
 carregarStorage();
-criarPanzoom();
+iniciarPanzoom();
 renderizarPontos();
