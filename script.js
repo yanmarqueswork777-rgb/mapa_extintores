@@ -2,7 +2,6 @@
    FireMap — script.js
    ============================================================ */
 
-/* ── ESTADO ── */
 let dados = {
   1: { tipo: "Pó Químico ABC", validade: "2026-05-10", setor: "Galpão A" },
   2: { tipo: "CO₂",            validade: "2026-03-25", setor: "Galpão A" }
@@ -51,8 +50,8 @@ function diasRestantes(val) {
 function diasLabel(val) {
   const d = diasRestantes(val);
   if (d === -999) return "Sem validade";
-  if (d < 0)     return `${Math.abs(d)} dias vencido`;
-  if (d === 0)   return "Vence hoje!";
+  if (d < 0)      return `${Math.abs(d)} dias vencido`;
+  if (d === 0)    return "Vence hoje!";
   return `${d} dias restantes`;
 }
 function statusLabel(s) {
@@ -93,6 +92,24 @@ function setView(v) {
   if (v === "lista") renderizarLista();
 }
 
+/* ── PANZOOM: criar e destruir ── */
+function criarPanzoom() {
+  if (pz) return;
+  pz = Panzoom(document.getElementById("mapa"), {
+    maxScale: 5,
+    minScale: 0.4,
+    contain:  "outside"
+  });
+}
+function destruirPanzoom() {
+  if (!pz) return;
+  pz.destroy();
+  pz = null;
+}
+function resetZoom() {
+  if (pz) pz.reset();
+}
+
 /* ── RENDERIZAR PONTOS ── */
 function renderizarPontos() {
   document.querySelectorAll(".ponto").forEach(p => p.remove());
@@ -110,41 +127,39 @@ function renderPonto(id) {
   const div = document.createElement("div");
   div.id        = "p" + id;
   div.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
-  div.style.top  = pos.top;
-  div.style.left = pos.left;
+  div.style.top    = pos.top;
+  div.style.left   = pos.left;
+  div.style.zIndex = "20";
 
-  // Tooltip
   const tt = document.createElement("div");
   tt.className   = "ttip";
   tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
   div.appendChild(tt);
 
-  // Clique normal → abre painel
+  /* Clique (sem edição) → abre painel */
   div.addEventListener("click", e => {
     if (modoEdicao) return;
     e.stopPropagation();
     abrirPainel(id);
   });
 
-  // Drag no modo edição (escuta no próprio ponto, sem panzoom no caminho)
+  /* Drag no modo edição */
   div.addEventListener("mousedown", e => {
     if (!modoEdicao) return;
     e.stopPropagation();
     e.preventDefault();
 
     const mapaEl = document.getElementById("mapa");
-    // Usa a escala atual do panzoom (mesmo com panzoom pausado, getTransform() funciona)
-    const escala = pz ? pz.getTransform().scale : 1;
     const rect   = mapaEl.getBoundingClientRect();
-    const ox     = (e.clientX - rect.left) / escala - parseFloat(div.style.left);
-    const oy     = (e.clientY - rect.top)  / escala - parseFloat(div.style.top);
+    const ox     = e.clientX - rect.left - parseFloat(div.style.left);
+    const oy     = e.clientY - rect.top  - parseFloat(div.style.top);
 
     document.body.style.userSelect = "none";
 
     function onMove(ev) {
-      const r2 = mapaEl.getBoundingClientRect();
-      div.style.left = ((ev.clientX - r2.left) / escala - ox) + "px";
-      div.style.top  = ((ev.clientY - r2.top)  / escala - oy) + "px";
+      const r = mapaEl.getBoundingClientRect();
+      div.style.left = (ev.clientX - r.left - ox) + "px";
+      div.style.top  = (ev.clientY - r.top  - oy) + "px";
     }
     function onUp() {
       posicoes[id] = { top: div.style.top, left: div.style.left };
@@ -161,44 +176,17 @@ function renderPonto(id) {
   document.getElementById("mapa").appendChild(div);
 }
 
-/* ── OVERLAY DE EDIÇÃO ── 
-   Um div transparente sobre o mapa que captura cliques no fundo
-   sem brigar com o panzoom (que fica desativado no modo edição).
-*/
-function criarOverlay() {
-  let overlay = document.getElementById("editOverlay");
-  if (overlay) return overlay;
+/* ── ADICIONAR CLICANDO NO MAPA (modo edição) ── */
+document.getElementById("mapa").addEventListener("click", e => {
+  if (!modoEdicao) return;
+  if (e.target.closest(".ponto")) return;
 
-  overlay = document.createElement("div");
-  overlay.id = "editOverlay";
-  overlay.style.cssText = `
-    position: absolute; inset: 0; z-index: 5;
-    cursor: crosshair; display: none;
-  `;
-
-  let startX, startY;
-
-  overlay.addEventListener("mousedown", e => {
-    startX = e.clientX; startY = e.clientY;
-  });
-
-  overlay.addEventListener("mouseup", e => {
-    if (startX === undefined) return;
-    const dist = Math.hypot(e.clientX - startX, e.clientY - startY);
-    if (dist > 6) { startX = undefined; return; } // foi pan
-
-    const escala = pz ? pz.getTransform().scale : 1;
-    const mapa   = document.getElementById("mapa");
-    const rect   = mapa.getBoundingClientRect();
-    const x      = Math.round((startX - rect.left) / escala);
-    const y      = Math.round((startY - rect.top)  / escala);
-    startX = undefined;
-    adicionarExtintor(x, y);
-  });
-
-  document.getElementById("mapaContainer").appendChild(overlay);
-  return overlay;
-}
+  const mapaEl = document.getElementById("mapa");
+  const rect   = mapaEl.getBoundingClientRect();
+  const x      = Math.round(e.clientX - rect.left);
+  const y      = Math.round(e.clientY - rect.top);
+  adicionarExtintor(x, y);
+});
 
 function adicionarExtintor(x, y) {
   const id = proximoId++;
@@ -324,37 +312,25 @@ function toggleEdicao() {
   document.getElementById("btnEdicao").classList.toggle("ativo", modoEdicao);
   document.getElementById("modoEdBadge").classList.toggle("hidden", !modoEdicao);
   document.getElementById("mapaContainer").classList.toggle("modo-adicionar", modoEdicao);
-
-  const hint    = document.getElementById("addHint");
-  const overlay = criarOverlay();
+  const hint = document.getElementById("addHint");
+  if (hint) hint.classList.toggle("hidden", !modoEdicao);
 
   if (modoEdicao) {
-    // Desativa panzoom completamente para os eventos chegarem livres
-    pz.setOptions({ disablePan: true });
-    overlay.style.display = "block";
-    if (hint) hint.classList.remove("hidden");
+    /* DESTRUIR panzoom — única forma garantida de liberar os eventos */
+    destruirPanzoom();
     fecharPainel();
     toast("Modo edição ativo — arraste pontos ou clique no mapa para adicionar", "warn");
   } else {
-    pz.setOptions({ disablePan: false });
-    overlay.style.display = "none";
-    if (hint) hint.classList.add("hidden");
+    /* RECRIAR panzoom ao sair do modo edição */
+    criarPanzoom();
     toast("Modo edição desativado", "ok");
   }
 }
 
-/* ── ZOOM ── */
-function iniciarPanzoom() {
-  pz = Panzoom(document.getElementById("mapa"), {
-    maxScale: 5,
-    minScale: 0.4,
-    contain:  "outside"
-  });
-  document.getElementById("mapaContainer").addEventListener("wheel", e => {
-    pz.zoomWithWheel(e);
-  });
-}
-function resetZoom() { pz.reset(); }
+/* ── WHEEL ZOOM (funciona mesmo sem panzoom ativo) ── */
+document.getElementById("mapaContainer").addEventListener("wheel", e => {
+  if (pz) pz.zoomWithWheel(e);
+});
 
 /* ── TOAST ── */
 function toast(msg, tipo = "") {
@@ -385,5 +361,5 @@ function exportarRelatorio() {
 
 /* ── INIT ── */
 carregarStorage();
-iniciarPanzoom();
+criarPanzoom();
 renderizarPontos();
