@@ -13,6 +13,77 @@
 
 <div id="toast-container"></div>
 
+<!-- ══════════════════════════════════════
+     MODAL: ESCOLHER MODO DE EDIÇÃO
+     ══════════════════════════════════════ -->
+<div id="modalEdicao" class="modal-overlay hidden" onclick="fecharModalEdicao()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>O que deseja fazer?</h2>
+      <button class="modal-close" onclick="fecharModalEdicao()">✕</button>
+    </div>
+    <div class="modal-opcoes">
+      <button class="modal-opcao" onclick="entrarModoMover()">
+        <div class="opcao-icon mover-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+        </div>
+        <div class="opcao-texto">
+          <strong>Mover existente</strong>
+          <span>Arraste um extintor para reposicioná-lo no mapa</span>
+        </div>
+      </button>
+      <button class="modal-opcao" onclick="entrarModoCriar()">
+        <div class="opcao-icon criar-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        </div>
+        <div class="opcao-texto">
+          <strong>Criar novo</strong>
+          <span>Cadastre um extintor e posicione-o no mapa</span>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     MODAL: CADASTRAR NOVO EXTINTOR
+     ══════════════════════════════════════ -->
+<div id="modalCadastro" class="modal-overlay hidden" onclick="cancelarCadastro()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2>Novo Extintor</h2>
+      <button class="modal-close" onclick="cancelarCadastro()">✕</button>
+    </div>
+    <div class="modal-form">
+      <div class="mf-field">
+        <label>Setor / Local</label>
+        <input type="text" id="novoSetor" placeholder="Ex: Galpão A — Porta Lateral">
+      </div>
+      <div class="mf-field">
+        <label>Tipo do Extintor</label>
+        <select id="novoTipo">
+          <option>Pó Químico ABC</option>
+          <option>CO₂</option>
+          <option>Água</option>
+          <option>Espuma</option>
+          <option>Halotron</option>
+        </select>
+      </div>
+      <div class="mf-field">
+        <label>Data de Validade</label>
+        <input type="date" id="novaValidade">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="mf-btn secondary" onclick="cancelarCadastro()">Cancelar</button>
+      <button class="mf-btn primary" onclick="confirmarCadastro()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Confirmar e Posicionar
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- SIDEBAR -->
 <aside id="sidebar">
   <div class="sidebar-logo">
@@ -36,29 +107,15 @@
     </button>
   </nav>
 
-  <!-- STATS -->
   <div class="stat-cards">
-    <div class="stat-card">
-      <span class="sc-num" id="statTotal">0</span>
-      <span class="sc-label">Total</span>
-    </div>
-    <div class="stat-card ok">
-      <span class="sc-num" id="statOk">0</span>
-      <span class="sc-label">Em dia</span>
-    </div>
-    <div class="stat-card warn">
-      <span class="sc-num" id="statWarn">0</span>
-      <span class="sc-label">Vencendo</span>
-    </div>
-    <div class="stat-card danger">
-      <span class="sc-num" id="statExp">0</span>
-      <span class="sc-label">Vencidos</span>
-    </div>
+    <div class="stat-card"><span class="sc-num" id="statTotal">0</span><span class="sc-label">Total</span></div>
+    <div class="stat-card ok"><span class="sc-num" id="statOk">0</span><span class="sc-label">Em dia</span></div>
+    <div class="stat-card warn"><span class="sc-num" id="statWarn">0</span><span class="sc-label">Vencendo</span></div>
+    <div class="stat-card danger"><span class="sc-num" id="statExp">0</span><span class="sc-label">Vencidos</span></div>
   </div>
 
   <div class="sidebar-divider"></div>
 
-  <!-- AÇÕES -->
   <div class="sidebar-actions">
     <button id="btnEdicao" class="action-btn" onclick="toggleEdicao()">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -76,10 +133,9 @@
 
   <div id="modoEdBadge" class="modo-badge hidden">
     <span class="badge-dot"></span>
-    Modo edição ativo
+    <span id="modoEdBadgeTexto"></span>
   </div>
 
-  <!-- LEGENDA -->
   <div class="sidebar-divider"></div>
   <div class="legenda">
     <p class="legenda-titulo">Legenda</p>
@@ -91,8 +147,6 @@
 
 <!-- MAIN -->
 <main id="main">
-
-  <!-- TOPBAR -->
   <div id="topbar">
     <div class="topbar-left">
       <h1 id="viewTitle">Mapa de Extintores</h1>
@@ -106,26 +160,18 @@
     </div>
   </div>
 
-  <!-- VIEW: MAPA -->
   <div id="viewMapa" class="view">
     <div id="mapaContainer">
       <div id="mapa">
         <img src="imagens/galpaoA.png" alt="Planta do Galpão A" draggable="false">
       </div>
-      <!-- Hint de adição -->
-      <div id="addHint" class="add-hint hidden">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Clique no mapa para adicionar um extintor
-      </div>
     </div>
   </div>
 
-  <!-- VIEW: LISTA -->
   <div id="viewLista" class="view hidden">
     <div id="listaContainer"></div>
   </div>
 
-  <!-- PAINEL DETALHES -->
   <div id="detailPanel" class="detail-panel hidden">
     <div class="dp-header">
       <div>
@@ -136,33 +182,19 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-
     <div class="dp-status-bar" id="dpStatusBar">
       <span class="dp-status-icon" id="dpStatusIcon"></span>
       <span class="dp-status-text" id="dpStatusText"></span>
       <span class="dp-dias" id="dpDias"></span>
     </div>
-
     <div class="dp-body">
-      <div class="dp-field">
-        <label>Setor / Local</label>
-        <input type="text" id="editSetor" placeholder="Ex: Galpão A — Porta Lateral">
-      </div>
-      <div class="dp-field">
-        <label>Tipo do Extintor</label>
+      <div class="dp-field"><label>Setor / Local</label><input type="text" id="editSetor" placeholder="Ex: Galpão A — Porta Lateral"></div>
+      <div class="dp-field"><label>Tipo do Extintor</label>
         <select id="editTipo">
-          <option>Pó Químico ABC</option>
-          <option>CO₂</option>
-          <option>Água</option>
-          <option>Espuma</option>
-          <option>Halotron</option>
+          <option>Pó Químico ABC</option><option>CO₂</option><option>Água</option><option>Espuma</option><option>Halotron</option>
         </select>
       </div>
-      <div class="dp-field">
-        <label>Data de Validade</label>
-        <input type="date" id="editValidade">
-      </div>
-
+      <div class="dp-field"><label>Data de Validade</label><input type="date" id="editValidade"></div>
       <div class="dp-actions">
         <button class="dp-btn primary" onclick="salvarEdicao()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
@@ -179,7 +211,6 @@
       </div>
     </div>
   </div>
-
 </main>
 
 <script src="script.js"></script>

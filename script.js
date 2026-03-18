@@ -11,10 +11,11 @@ let posicoes = {
   2: { top: "250px", left: "400px" }
 };
 let proximoId  = 3;
-let modoEdicao = false;
+let modoAtual  = null; // null | "mover" | "colocar"
 let idAtivo    = null;
 let viewAtual  = "mapa";
 let pz         = null;
+let pinFantasma = null; // elemento que segue o cursor ao colocar
 
 /* ── PERSISTÊNCIA ── */
 function salvarStorage() {
@@ -92,23 +93,18 @@ function setView(v) {
   if (v === "lista") renderizarLista();
 }
 
-/* ── PANZOOM: criar e destruir ── */
+/* ── PANZOOM ── */
 function criarPanzoom() {
   if (pz) return;
-  pz = Panzoom(document.getElementById("mapa"), {
-    maxScale: 5,
-    minScale: 0.4,
-    contain:  "outside"
-  });
+  pz = Panzoom(document.getElementById("mapa"), { maxScale: 5, minScale: 0.4, contain: "outside" });
 }
 function destruirPanzoom() {
   if (!pz) return;
   pz.destroy();
   pz = null;
 }
-function resetZoom() {
-  if (pz) pz.reset();
-}
+function resetZoom() { if (pz) pz.reset(); }
+document.getElementById("mapaContainer").addEventListener("wheel", e => { if (pz) pz.zoomWithWheel(e); });
 
 /* ── RENDERIZAR PONTOS ── */
 function renderizarPontos() {
@@ -136,16 +132,16 @@ function renderPonto(id) {
   tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
   div.appendChild(tt);
 
-  /* Clique (sem edição) → abre painel */
+  /* Clique normal → abre painel */
   div.addEventListener("click", e => {
-    if (modoEdicao) return;
+    if (modoAtual) return;
     e.stopPropagation();
     abrirPainel(id);
   });
 
-  /* Drag no modo edição */
+  /* Drag no modo mover */
   div.addEventListener("mousedown", e => {
-    if (!modoEdicao) return;
+    if (modoAtual !== "mover") return;
     e.stopPropagation();
     e.preventDefault();
 
@@ -154,6 +150,7 @@ function renderPonto(id) {
     const ox     = e.clientX - rect.left - parseFloat(div.style.left);
     const oy     = e.clientY - rect.top  - parseFloat(div.style.top);
 
+    div.style.opacity = "0.7";
     document.body.style.userSelect = "none";
 
     function onMove(ev) {
@@ -162,7 +159,8 @@ function renderPonto(id) {
       div.style.top  = (ev.clientY - r.top  - oy) + "px";
     }
     function onUp() {
-      posicoes[id] = { top: div.style.top, left: div.style.left };
+      posicoes[id]   = { top: div.style.top, left: div.style.left };
+      div.style.opacity = "1";
       salvarStorage();
       toast("Posição salva", "ok");
       document.body.style.userSelect = "";
@@ -176,27 +174,139 @@ function renderPonto(id) {
   document.getElementById("mapa").appendChild(div);
 }
 
-/* ── ADICIONAR CLICANDO NO MAPA (modo edição) ── */
-document.getElementById("mapa").addEventListener("click", e => {
-  if (!modoEdicao) return;
-  if (e.target.closest(".ponto")) return;
+/* ════════════════════════════════════════
+   MODAL DE SELEÇÃO DE MODO
+   ════════════════════════════════════════ */
+function toggleEdicao() {
+  if (modoAtual) {
+    sairModoEdicao();
+    return;
+  }
+  abrirModalEdicao();
+}
 
-  const mapaEl = document.getElementById("mapa");
-  const rect   = mapaEl.getBoundingClientRect();
-  const x      = Math.round(e.clientX - rect.left);
-  const y      = Math.round(e.clientY - rect.top);
-  adicionarExtintor(x, y);
+function abrirModalEdicao() {
+  document.getElementById("modalEdicao").classList.remove("hidden");
+}
+
+function fecharModalEdicao() {
+  document.getElementById("modalEdicao").classList.add("hidden");
+}
+
+function entrarModoMover() {
+  fecharModalEdicao();
+  modoAtual = "mover";
+  destruirPanzoom();
+  document.getElementById("btnEdicao").classList.add("ativo");
+  document.getElementById("modoEdBadge").classList.remove("hidden");
+  document.getElementById("modoEdBadgeTexto").textContent = "✏️  Modo mover — arraste os extintores";
+  fecharPainel();
+  toast("Modo mover ativo — arraste os extintores para reposicioná-los", "warn");
+}
+
+/* ════════════════════════════════════════
+   FLUXO: CRIAR NOVO
+   ════════════════════════════════════════ */
+let novoExtintorDados = null; // dados preenchidos no form, aguardando posicionamento
+
+function entrarModoCriar() {
+  fecharModalEdicao();
+  // Abre formulário de cadastro antes de posicionar
+  document.getElementById("modalCadastro").classList.remove("hidden");
+}
+
+function confirmarCadastro() {
+  const tipo     = document.getElementById("novoTipo").value;
+  const validade = document.getElementById("novaValidade").value;
+  const setor    = document.getElementById("novoSetor").value.trim();
+
+  if (!validade) { toast("Informe a validade!", "err"); return; }
+
+  novoExtintorDados = { tipo, validade, setor: setor || "Galpão A" };
+  document.getElementById("modalCadastro").classList.add("hidden");
+
+  // Entra no modo "colocar": pin fantasma segue o cursor
+  modoAtual = "colocar";
+  destruirPanzoom();
+  document.getElementById("btnEdicao").classList.add("ativo");
+  document.getElementById("modoEdBadge").classList.remove("hidden");
+  document.getElementById("modoEdBadgeTexto").textContent = "📍  Clique no mapa para posicionar o extintor";
+  document.getElementById("mapaContainer").classList.add("modo-adicionar");
+
+  criarPinFantasma();
+  toast("Clique no mapa para posicionar o extintor", "warn");
+}
+
+function cancelarCadastro() {
+  document.getElementById("modalCadastro").classList.add("hidden");
+  novoExtintorDados = null;
+}
+
+/* Pin fantasma que segue o cursor */
+function criarPinFantasma() {
+  if (pinFantasma) pinFantasma.remove();
+  pinFantasma = document.createElement("div");
+  pinFantasma.className = "ponto fantasma verde";
+  pinFantasma.style.zIndex   = "100";
+  pinFantasma.style.pointerEvents = "none";
+  pinFantasma.style.position = "absolute";
+  pinFantasma.style.display  = "none";
+  document.getElementById("mapa").appendChild(pinFantasma);
+}
+
+document.getElementById("mapaContainer").addEventListener("mousemove", e => {
+  if (modoAtual !== "colocar" || !pinFantasma) return;
+  const rect = document.getElementById("mapa").getBoundingClientRect();
+  const x    = e.clientX - rect.left;
+  const y    = e.clientY - rect.top;
+  pinFantasma.style.display = "block";
+  pinFantasma.style.left    = x + "px";
+  pinFantasma.style.top     = y + "px";
 });
 
-function adicionarExtintor(x, y) {
+document.getElementById("mapaContainer").addEventListener("mouseleave", () => {
+  if (pinFantasma) pinFantasma.style.display = "none";
+});
+
+/* Clique no mapa para posicionar */
+document.getElementById("mapa").addEventListener("click", e => {
+  if (modoAtual !== "colocar" || !novoExtintorDados) return;
+  if (e.target.closest(".ponto:not(.fantasma)")) return;
+
+  const rect = document.getElementById("mapa").getBoundingClientRect();
+  const x    = Math.round(e.clientX - rect.left);
+  const y    = Math.round(e.clientY - rect.top);
+
+  // Cria o extintor com os dados preenchidos
   const id = proximoId++;
-  dados[id]    = { tipo: "Pó Químico ABC", validade: "", setor: "Galpão A" };
+  dados[id]    = { ...novoExtintorDados };
   posicoes[id] = { top: y + "px", left: x + "px" };
+  novoExtintorDados = null;
+
+  if (pinFantasma) { pinFantasma.remove(); pinFantasma = null; }
+
   salvarStorage();
   renderPonto(id);
   atualizarStats();
-  abrirPainel(id);
-  toast(`Extintor #${id} adicionado — preencha os dados →`, "ok");
+
+  // Após colocar, entra automaticamente no modo mover
+  modoAtual = "mover";
+  document.getElementById("mapaContainer").classList.remove("modo-adicionar");
+  document.getElementById("modoEdBadgeTexto").textContent = "✏️  Modo mover — arraste os extintores";
+
+  toast(`Extintor #${id} posicionado! Arraste para ajustar se precisar.`, "ok");
+});
+
+/* ── SAIR DO MODO EDIÇÃO ── */
+function sairModoEdicao() {
+  modoAtual = null;
+  novoExtintorDados = null;
+  if (pinFantasma) { pinFantasma.remove(); pinFantasma = null; }
+  criarPanzoom();
+  document.getElementById("btnEdicao").classList.remove("ativo");
+  document.getElementById("modoEdBadge").classList.add("hidden");
+  document.getElementById("mapaContainer").classList.remove("modo-adicionar");
+  toast("Modo edição desativado", "ok");
 }
 
 /* ── PAINEL ── */
@@ -305,32 +415,6 @@ function abrirPainelLista(id) {
 function filtrarLista(v) {
   if (viewAtual === "lista") renderizarLista(v);
 }
-
-/* ── MODO EDIÇÃO ── */
-function toggleEdicao() {
-  modoEdicao = !modoEdicao;
-  document.getElementById("btnEdicao").classList.toggle("ativo", modoEdicao);
-  document.getElementById("modoEdBadge").classList.toggle("hidden", !modoEdicao);
-  document.getElementById("mapaContainer").classList.toggle("modo-adicionar", modoEdicao);
-  const hint = document.getElementById("addHint");
-  if (hint) hint.classList.toggle("hidden", !modoEdicao);
-
-  if (modoEdicao) {
-    /* DESTRUIR panzoom — única forma garantida de liberar os eventos */
-    destruirPanzoom();
-    fecharPainel();
-    toast("Modo edição ativo — arraste pontos ou clique no mapa para adicionar", "warn");
-  } else {
-    /* RECRIAR panzoom ao sair do modo edição */
-    criarPanzoom();
-    toast("Modo edição desativado", "ok");
-  }
-}
-
-/* ── WHEEL ZOOM (funciona mesmo sem panzoom ativo) ── */
-document.getElementById("mapaContainer").addEventListener("wheel", e => {
-  if (pz) pz.zoomWithWheel(e);
-});
 
 /* ── TOAST ── */
 function toast(msg, tipo = "") {
