@@ -7,17 +7,19 @@
 </head>
 <body>
 
-<h2>Mapa de Extintores</h2>
+<h2>🔥 Controle de Extintores</h2>
 
-<select id="galpaoSelect">
-  <option value="A">Galpão A</option>
-</select>
+<div class="topo">
+  <select id="galpaoSelect">
+    <option value="A">Galpão A</option>
+  </select>
+</div>
 
 <div class="mapa">
-  <img src="imagens/galpaoA.png" id="mapaImg">
+  <img src="imagens/galpaoA.png">
 
-  <div class="ponto" style="top: 100px; left: 200px;" onclick="abrir(1)"></div>
-  <div class="ponto" style="top: 250px; left: 400px;" onclick="abrir(2)"></div>
+  <div id="p1" class="ponto" style="top: 100px; left: 200px;" onclick="abrir(1)"></div>
+  <div id="p2" class="ponto" style="top: 250px; left: 400px;" onclick="abrir(2)"></div>
 
 </div>
 
