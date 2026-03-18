@@ -1,27 +1,34 @@
 body {
   font-family: Arial;
-  background: #f4f6f8;
+  background: #eef1f5;
   padding: 20px;
 }
 
-h2 {
+.topo {
   margin-bottom: 10px;
 }
 
-.topo {
-  margin-bottom: 15px;
+.container {
+  display: flex;
+  gap: 20px;
 }
 
-.mapa {
-  position: relative;
-  display: inline-block;
+#mapaContainer {
+  width: 900px;
+  height: 600px;
+  overflow: hidden;
   border: 2px solid #ccc;
   background: white;
-  padding: 10px;
 }
 
-.mapa img {
-  width: 800px;
+#mapa {
+  position: relative;
+  width: 1000px;
+}
+
+#mapa img {
+  width: 100%;
+  display: block;
 }
 
 .ponto {
@@ -38,11 +45,10 @@ h2 {
 .vermelho { background: #e74c3c; }
 
 #infoBox {
-  margin-top: 20px;
+  width: 300px;
   padding: 15px;
   background: white;
   border-left: 5px solid #333;
-  width: 300px;
 }
 
 .hidden {
@@ -50,7 +56,7 @@ h2 {
 }
 
 button {
-  margin-top: 10px;
-  padding: 5px 10px;
+  margin-right: 5px;
+  padding: 6px 10px;
   cursor: pointer;
 }
