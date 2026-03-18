@@ -107,60 +107,78 @@ function renderPonto(id) {
   const div = document.createElement("div");
   div.id        = "p" + id;
   div.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
-  div.style.top  = pos.top;
-  div.style.left = pos.left;
+  div.style.top    = pos.top;
+  div.style.left   = pos.left;
+  div.style.touchAction = "none"; // necessário para pointer capture
 
   const tt = document.createElement("div");
   tt.className = "ttip";
   tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Vence hoje!" : dias + "d"}`;
   div.appendChild(tt);
 
-  div.addEventListener("click", e => { if (!modoEdicao) { e.stopPropagation(); abrirPainel(id); } });
-  div.addEventListener("mousedown", e => { if (modoEdicao) { e.stopPropagation(); e.preventDefault(); iniciarDrag(div, id, e); } });
+  // Clique normal para abrir painel
+  div.addEventListener("click", e => {
+    if (!modoEdicao) { e.stopPropagation(); abrirPainel(id); }
+  });
+
+  // Drag via Pointer Capture — não conflita com panzoom
+  div.addEventListener("pointerdown", e => {
+    if (!modoEdicao) return;
+    e.stopPropagation();
+    e.preventDefault();
+    div.setPointerCapture(e.pointerId); // captura todos os eventos no elemento
+    const s = pz.getTransform().scale;
+    const r = document.getElementById("mapa").getBoundingClientRect();
+    drag.ativo = true;
+    drag.el    = div;
+    drag.id    = id;
+    drag.ox    = (e.clientX - r.left) / s - parseFloat(div.style.left);
+    drag.oy    = (e.clientY - r.top)  / s - parseFloat(div.style.top);
+    document.body.style.userSelect = "none";
+  });
+
+  div.addEventListener("pointermove", e => {
+    if (!drag.ativo || drag.el !== div) return;
+    const s = pz.getTransform().scale;
+    const r = document.getElementById("mapa").getBoundingClientRect();
+    div.style.left = ((e.clientX - r.left) / s - drag.ox) + "px";
+    div.style.top  = ((e.clientY - r.top)  / s - drag.oy) + "px";
+  });
+
+  div.addEventListener("pointerup", e => {
+    if (!drag.ativo || drag.el !== div) return;
+    posicoes[id] = { top: div.style.top, left: div.style.left };
+    salvarStorage();
+    toast("Posição salva", "ok");
+    drag.ativo = false; drag.el = null; drag.id = null;
+    document.body.style.userSelect = "";
+  });
 
   document.getElementById("mapa").appendChild(div);
 }
 
-/* ── DRAG ── */
+/* ── DRAG STATE ── */
 let drag = { ativo: false, el: null, id: null, ox: 0, oy: 0 };
 
-function iniciarDrag(el, id, e) {
-  drag.ativo = true; drag.el = el; drag.id = id;
-  const s = pz.getTransform().scale;
-  const r = document.getElementById("mapa").getBoundingClientRect();
-  drag.ox = (e.clientX - r.left) / s - parseFloat(el.style.left);
-  drag.oy = (e.clientY - r.top) / s - parseFloat(el.style.top);
-  pz.setOptions({ disablePan: true });
-  document.body.style.userSelect = "none";
-}
-
-document.addEventListener("mousemove", e => {
-  if (!drag.ativo) return;
-  const s = pz.getTransform().scale;
-  const r = document.getElementById("mapa").getBoundingClientRect();
-  drag.el.style.left = ((e.clientX - r.left) / s - drag.ox) + "px";
-  drag.el.style.top  = ((e.clientY - r.top) / s - drag.oy) + "px";
+/* ── MAPA — adicionar clicando (mousedown+mouseup para evitar conflito com panzoom) ── */
+let addDown = null;
+document.getElementById("mapaContainer").addEventListener("mousedown", e => {
+  if (!modoEdicao || e.target.closest(".ponto")) return;
+  addDown = { x: e.clientX, y: e.clientY };
 });
 
-document.addEventListener("mouseup", () => {
-  if (!drag.ativo) return;
-  posicoes[drag.id] = { top: drag.el.style.top, left: drag.el.style.left };
-  salvarStorage();
-  toast("Posição salva", "ok");
-  drag.ativo = false; drag.el = null; drag.id = null;
-  pz.setOptions({ disablePan: modoEdicao ? true : false });
-  document.body.style.userSelect = "";
-});
-
-/* ── MAPA — adicionar clicando ── */
-document.getElementById("mapaContainer").addEventListener("click", e => {
-  if (!modoEdicao) return;
-  if (e.target.closest(".ponto")) return;
-  const s  = pz.getTransform().scale;
-  const r  = document.getElementById("mapa").getBoundingClientRect();
-  const x  = Math.round((e.clientX - r.left) / s);
-  const y  = Math.round((e.clientY - r.top) / s);
-  adicionarExtintor(x, y);
+document.getElementById("mapaContainer").addEventListener("mouseup", e => {
+  if (!modoEdicao || !addDown || e.target.closest(".ponto")) { addDown = null; return; }
+  const dist = Math.hypot(e.clientX - addDown.x, e.clientY - addDown.y);
+  const pos  = { ...addDown };
+  addDown = null;
+  if (dist > 6) return; // foi um arrasto, não um clique
+  const s = pz.getTransform().scale;
+  const r = document.getElementById("mapa").getBoundingClientRect();
+  adicionarExtintor(
+    Math.round((pos.x - r.left) / s),
+    Math.round((pos.y - r.top)  / s)
+  );
 });
 
 function adicionarExtintor(x, y) {
@@ -303,7 +321,6 @@ function toggleEdicao() {
   hint?.classList.toggle("hidden", !modoEdicao);
   document.getElementById("mapaContainer").classList.toggle("modo-adicionar", modoEdicao);
 
-  pz.setOptions({ disablePan: modoEdicao });
   fecharPainel();
   toast(modoEdicao ? "Modo edição ativo — arraste ou clique para adicionar" : "Modo edição desativado", modoEdicao ? "warn" : "ok");
 }
