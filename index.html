@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Mapa de Extintores</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h2>Mapa de Extintores</h2>
+
+<select id="galpaoSelect">
+  <option value="A">Galpão A</option>
+</select>
+
+<div class="mapa">
+  <img src="imagens/galpaoA.png" id="mapaImg">
+
+  <div class="ponto" style="top: 100px; left: 200px;" onclick="abrir(1)"></div>
+  <div class="ponto" style="top: 250px; left: 400px;" onclick="abrir(2)"></div>
+
+</div>
+
+<div id="infoBox" class="hidden"></div>
+
+<script src="script.js"></script>
+
+</body>
+</html>

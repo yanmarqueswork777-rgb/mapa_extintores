@@ -1,0 +1,27 @@
+.mapa {
+  position: relative;
+  display: inline-block;
+}
+
+.mapa img {
+  width: 800px;
+}
+
+.ponto {
+  width: 15px;
+  height: 15px;
+  background-color: red;
+  border-radius: 50%;
+  position: absolute;
+  cursor: pointer;
+}
+
+#infoBox {
+  margin-top: 20px;
+  padding: 10px;
+  border: 1px solid #000;
+}
+
+.hidden {
+  display: none;
+}
