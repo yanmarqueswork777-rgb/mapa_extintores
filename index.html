@@ -55,6 +55,23 @@
       <button class="modal-close" onclick="cancelarCadastro()">✕</button>
     </div>
     <div class="modal-form">
+
+      <!-- CAMPO DE IDENTIFICAÇÃO -->
+      <div class="mf-field">
+        <label>Identificação</label>
+        <div class="id-row">
+          <div class="id-input-wrap">
+            <span class="id-prefix">#</span>
+            <input type="text" id="novoId" placeholder="ex: 01, 02, A1..." oninput="validarId(this.value)">
+          </div>
+          <button class="id-sugestao-btn" onclick="usarProximoId()" title="Usar próximo número disponível">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            Sugerir
+          </button>
+        </div>
+        <span class="id-feedback" id="idFeedback"></span>
+      </div>
+
       <div class="mf-field">
         <label>Setor / Local</label>
         <input type="text" id="novoSetor" placeholder="Ex: Galpão A — Porta Lateral">
@@ -76,7 +93,7 @@
     </div>
     <div class="modal-footer">
       <button class="mf-btn secondary" onclick="cancelarCadastro()">Cancelar</button>
-      <button class="mf-btn primary" onclick="confirmarCadastro()">
+      <button class="mf-btn primary" id="btnConfirmarCadastro" onclick="confirmarCadastro()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
         Confirmar e Posicionar
       </button>

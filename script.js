@@ -19,7 +19,7 @@ let posicoes = {
   1: { top: "100px", left: "200px" },
   2: { top: "250px", left: "400px" }
 };
-let proximoId  = 3;
+let proximoId  = 3; // usado apenas como fallback
 let modoAtual  = null; // null | "mover" | "colocar"
 let idAtivo    = null;
 let viewAtual  = "mapa";
@@ -259,21 +259,82 @@ function entrarModoMover() {
 
 function entrarModoCriar() {
   fecharModalEdicao();
+  // Pré-preenche com o próximo ID disponível (editável)
+  const sugestao = proximoIdDisponivel();
+  const input    = document.getElementById("novoId");
+  input.value    = sugestao;
+  validarId(sugestao);
   document.getElementById("modalCadastro").classList.remove("hidden");
+  setTimeout(() => input.focus(), 100);
+}
+
+/* ── LÓGICA DE ID CUSTOMIZADO ── */
+
+function proximoIdDisponivel() {
+  // Encontra o menor número inteiro positivo que não está em uso
+  const usados = new Set(Object.keys(dados));
+  let n = 1;
+  while (usados.has(String(n))) n++;
+  return String(n);
+}
+
+function idJaExiste(val) {
+  return Object.keys(dados).includes(String(val).trim());
+}
+
+function validarId(val) {
+  const wrap  = document.getElementById("novoId").parentElement;
+  const fb    = document.getElementById("idFeedback");
+  const btn   = document.getElementById("btnConfirmarCadastro");
+  const v     = val.trim();
+
+  if (!v) {
+    wrap.classList.remove("id-ok", "id-erro");
+    fb.textContent = ""; fb.className = "id-feedback";
+    btn.disabled = false;
+    return;
+  }
+  if (idJaExiste(v)) {
+    wrap.classList.add("id-erro"); wrap.classList.remove("id-ok");
+    fb.textContent = `#${v} já existe — escolha outro`;
+    fb.className   = "id-feedback erro";
+    btn.disabled   = true;
+  } else {
+    wrap.classList.add("id-ok"); wrap.classList.remove("id-erro");
+    fb.textContent = `#${v} disponível`;
+    fb.className   = "id-feedback ok";
+    btn.disabled   = false;
+  }
+}
+
+function usarProximoId() {
+  const sugestao = proximoIdDisponivel();
+  const input    = document.getElementById("novoId");
+  input.value    = sugestao;
+  validarId(sugestao);
+  input.focus();
 }
 
 function confirmarCadastro() {
+  const idRaw    = document.getElementById("novoId").value.trim();
   const tipo     = document.getElementById("novoTipo").value;
   const validade = document.getElementById("novaValidade").value;
   const setor    = document.getElementById("novoSetor").value.trim();
-  if (!validade) { toast("Informe a validade!", "err"); return; }
 
-  novoExtintorDados = { tipo, validade, setor: setor || "Galpão A" };
+  if (!idRaw)    { toast("Informe a identificação do extintor!", "err"); return; }
+  if (!validade) { toast("Informe a validade!", "err"); return; }
+  if (idJaExiste(idRaw)) { toast(`#${idRaw} já existe!`, "err"); return; }
+
+  novoExtintorDados = { id: idRaw, tipo, validade, setor: setor || "Galpão A" };
   document.getElementById("modalCadastro").classList.add("hidden");
 
-  // Limpa o form para próxima vez
+  // Limpa o form
+  document.getElementById("novoId").value       = "";
   document.getElementById("novoSetor").value    = "";
   document.getElementById("novaValidade").value = "";
+  document.getElementById("idFeedback").textContent = "";
+  document.getElementById("novoId").parentElement.classList.remove("id-ok","id-erro");
+  document.getElementById("btnConfirmarCadastro").disabled = false;
 
   modoAtual = "colocar";
   destruirPanzoom();
@@ -333,9 +394,13 @@ document.getElementById("mapa").addEventListener("click", e => {
   const x    = Math.round(e.clientX - rect.left);
   const y    = Math.round(e.clientY - rect.top);
 
-  const id = proximoId++;
-  dados[id]    = { ...novoExtintorDados };
+  const id = novoExtintorDados.id;
+  const { id: _idKey, ...restDados } = novoExtintorDados;
+  dados[id]    = restDados;
   posicoes[id] = { top: y + "px", left: x + "px" };
+  // Atualiza proximoId se o id inserido for numérico
+  const numId = parseInt(id, 10);
+  if (!isNaN(numId) && numId >= proximoId) proximoId = numId + 1;
   novoExtintorDados = null;
 
   if (pinFantasma) { pinFantasma.remove(); pinFantasma = null; }
