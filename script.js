@@ -1,7 +1,16 @@
 /* ============================================================
-   FireMap — script.js
+   FireMap — script.js  (versão otimizada)
+   ============================================================
+   Melhorias de performance:
+   - Pontos são atualizados individualmente (sem re-render global)
+   - getBoundingClientRect() cacheado durante o drag
+   - RAF (requestAnimationFrame) controla o loop de drag
+   - localStorage com debounce (não escreve a cada pixel)
+   - querySelectorAll substituído por Map de referências
+   - Animações CSS só em pontos que precisam (will-change pontual)
    ============================================================ */
 
+/* ── ESTADO ── */
 let dados = {
   1: { tipo: "Pó Químico ABC", validade: "2026-05-10", setor: "Galpão A" },
   2: { tipo: "CO₂",            validade: "2026-03-25", setor: "Galpão A" }
@@ -15,10 +24,24 @@ let modoAtual  = null; // null | "mover" | "colocar"
 let idAtivo    = null;
 let viewAtual  = "mapa";
 let pz         = null;
-let pinFantasma = null; // elemento que segue o cursor ao colocar
+let pinFantasma = null;
+let novoExtintorDados = null;
 
-/* ── PERSISTÊNCIA ── */
+/* Map de referências DOM: id → elemento .ponto (evita querySelector repetido) */
+const pontoEls = new Map();
+
+/* ── PERSISTÊNCIA COM DEBOUNCE ── */
+let _saveTimer = null;
 function salvarStorage() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    localStorage.setItem("fm_dados",    JSON.stringify(dados));
+    localStorage.setItem("fm_posicoes", JSON.stringify(posicoes));
+    localStorage.setItem("fm_nextId",   String(proximoId));
+  }, 400); // agrupa escritas — não salva a cada pixel do drag
+}
+function salvarStorageImediato() {
+  clearTimeout(_saveTimer);
   localStorage.setItem("fm_dados",    JSON.stringify(dados));
   localStorage.setItem("fm_posicoes", JSON.stringify(posicoes));
   localStorage.setItem("fm_nextId",   String(proximoId));
@@ -78,6 +101,114 @@ function atualizarStats() {
   document.getElementById("statExp").textContent   = exp;
 }
 
+/* ── ATUALIZAR UM PONTO SEM RE-RENDER ── */
+function atualizarPonto(id) {
+  const el = pontoEls.get(String(id));
+  if (!el) return;
+  const status = calcularStatus(dados[id].validade);
+  const dias   = diasRestantes(dados[id].validade);
+  // Atualiza só o que mudou
+  el.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
+  const tt = el.querySelector(".ttip");
+  if (tt) tt.textContent = `#${id} — ${dados[id].tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
+}
+
+/* ── RENDERIZAR TODOS OS PONTOS (só na inicialização) ── */
+function renderizarPontos() {
+  // Remove pontos antigos e limpa o mapa
+  pontoEls.forEach(el => el.remove());
+  pontoEls.clear();
+  Object.keys(dados).forEach(id => renderPonto(id));
+  atualizarStats();
+}
+
+function renderPonto(id) {
+  const ext    = dados[id];
+  const pos    = posicoes[id];
+  if (!pos) return;
+  const status = calcularStatus(ext.validade);
+  const dias   = diasRestantes(ext.validade);
+
+  const div = document.createElement("div");
+  div.id        = "p" + id;
+  div.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
+  div.style.cssText = `top:${pos.top}; left:${pos.left}; z-index:20;`;
+
+  const tt = document.createElement("div");
+  tt.className   = "ttip";
+  tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
+  div.appendChild(tt);
+
+  div.addEventListener("click", e => {
+    if (modoAtual) return;
+    e.stopPropagation();
+    abrirPainel(id);
+  });
+
+  div.addEventListener("mousedown", e => {
+    if (modoAtual !== "mover") return;
+    e.stopPropagation();
+    e.preventDefault();
+    iniciarDrag(div, id, e);
+  });
+
+  document.getElementById("mapa").appendChild(div);
+  pontoEls.set(String(id), div);
+}
+
+/* ── DRAG OTIMIZADO COM RAF + CACHE DE RECT ── */
+function iniciarDrag(div, id, e) {
+  // Captura o rect UMA vez — não recalcula a cada mousemove
+  const mapaEl  = document.getElementById("mapa");
+  const rect    = mapaEl.getBoundingClientRect(); // leitura única
+  const ox      = e.clientX - rect.left - parseFloat(div.style.left);
+  const oy      = e.clientY - rect.top  - parseFloat(div.style.top);
+
+  let pendX = parseFloat(div.style.left);
+  let pendY = parseFloat(div.style.top);
+  let rafId = null;
+  let moveu = false;
+
+  div.style.willChange = "left, top";
+  div.style.opacity    = "0.8";
+  document.body.style.userSelect = "none";
+
+  function onMove(ev) {
+    pendX = ev.clientX - rect.left - ox;
+    pendY = ev.clientY - rect.top  - oy;
+    moveu = true;
+
+    // RAF garante no máximo 1 update por frame (60fps) — não 1 por evento
+    if (!rafId) {
+      rafId = requestAnimationFrame(() => {
+        div.style.left = pendX + "px";
+        div.style.top  = pendY + "px";
+        rafId = null;
+      });
+    }
+  }
+
+  function onUp() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
+    div.style.willChange = "";
+    div.style.opacity    = "1";
+    document.body.style.userSelect = "";
+
+    if (moveu) {
+      posicoes[id] = { top: div.style.top, left: div.style.left };
+      salvarStorage(); // debounced — não bloqueia
+      toast("Posição salva", "ok");
+    }
+
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup",   onUp);
+  }
+
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup",   onUp);
+}
+
 /* ── VIEWS ── */
 function setView(v) {
   viewAtual = v;
@@ -106,89 +237,11 @@ function destruirPanzoom() {
 function resetZoom() { if (pz) pz.reset(); }
 document.getElementById("mapaContainer").addEventListener("wheel", e => { if (pz) pz.zoomWithWheel(e); });
 
-/* ── RENDERIZAR PONTOS ── */
-function renderizarPontos() {
-  document.querySelectorAll(".ponto").forEach(p => p.remove());
-  Object.keys(dados).forEach(id => renderPonto(id));
-  atualizarStats();
-}
-
-function renderPonto(id) {
-  const ext    = dados[id];
-  const pos    = posicoes[id];
-  if (!pos) return;
-  const status = calcularStatus(ext.validade);
-  const dias   = diasRestantes(ext.validade);
-
-  const div = document.createElement("div");
-  div.id        = "p" + id;
-  div.className = `ponto ${status}${idAtivo == id ? " selecionado" : ""}`;
-  div.style.top    = pos.top;
-  div.style.left   = pos.left;
-  div.style.zIndex = "20";
-
-  const tt = document.createElement("div");
-  tt.className   = "ttip";
-  tt.textContent = `#${id} — ${ext.tipo} · ${dias < 0 ? "VENCIDO" : dias === 0 ? "Hoje!" : dias + "d"}`;
-  div.appendChild(tt);
-
-  /* Clique normal → abre painel */
-  div.addEventListener("click", e => {
-    if (modoAtual) return;
-    e.stopPropagation();
-    abrirPainel(id);
-  });
-
-  /* Drag no modo mover */
-  div.addEventListener("mousedown", e => {
-    if (modoAtual !== "mover") return;
-    e.stopPropagation();
-    e.preventDefault();
-
-    const mapaEl = document.getElementById("mapa");
-    const rect   = mapaEl.getBoundingClientRect();
-    const ox     = e.clientX - rect.left - parseFloat(div.style.left);
-    const oy     = e.clientY - rect.top  - parseFloat(div.style.top);
-
-    div.style.opacity = "0.7";
-    document.body.style.userSelect = "none";
-
-    function onMove(ev) {
-      const r = mapaEl.getBoundingClientRect();
-      div.style.left = (ev.clientX - r.left - ox) + "px";
-      div.style.top  = (ev.clientY - r.top  - oy) + "px";
-    }
-    function onUp() {
-      posicoes[id]   = { top: div.style.top, left: div.style.left };
-      div.style.opacity = "1";
-      salvarStorage();
-      toast("Posição salva", "ok");
-      document.body.style.userSelect = "";
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup",   onUp);
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup",   onUp);
-  });
-
-  document.getElementById("mapa").appendChild(div);
-}
-
-/* ════════════════════════════════════════
-   MODAL DE SELEÇÃO DE MODO
-   ════════════════════════════════════════ */
+/* ── MODAL EDIÇÃO ── */
 function toggleEdicao() {
-  if (modoAtual) {
-    sairModoEdicao();
-    return;
-  }
-  abrirModalEdicao();
-}
-
-function abrirModalEdicao() {
+  if (modoAtual) { sairModoEdicao(); return; }
   document.getElementById("modalEdicao").classList.remove("hidden");
 }
-
 function fecharModalEdicao() {
   document.getElementById("modalEdicao").classList.add("hidden");
 }
@@ -199,19 +252,13 @@ function entrarModoMover() {
   destruirPanzoom();
   document.getElementById("btnEdicao").classList.add("ativo");
   document.getElementById("modoEdBadge").classList.remove("hidden");
-  document.getElementById("modoEdBadgeTexto").textContent = "✏️  Modo mover — arraste os extintores";
+  document.getElementById("modoEdBadgeTexto").textContent = "Modo mover — arraste os extintores";
   fecharPainel();
   toast("Modo mover ativo — arraste os extintores para reposicioná-los", "warn");
 }
 
-/* ════════════════════════════════════════
-   FLUXO: CRIAR NOVO
-   ════════════════════════════════════════ */
-let novoExtintorDados = null; // dados preenchidos no form, aguardando posicionamento
-
 function entrarModoCriar() {
   fecharModalEdicao();
-  // Abre formulário de cadastro antes de posicionar
   document.getElementById("modalCadastro").classList.remove("hidden");
 }
 
@@ -219,18 +266,20 @@ function confirmarCadastro() {
   const tipo     = document.getElementById("novoTipo").value;
   const validade = document.getElementById("novaValidade").value;
   const setor    = document.getElementById("novoSetor").value.trim();
-
   if (!validade) { toast("Informe a validade!", "err"); return; }
 
   novoExtintorDados = { tipo, validade, setor: setor || "Galpão A" };
   document.getElementById("modalCadastro").classList.add("hidden");
 
-  // Entra no modo "colocar": pin fantasma segue o cursor
+  // Limpa o form para próxima vez
+  document.getElementById("novoSetor").value    = "";
+  document.getElementById("novaValidade").value = "";
+
   modoAtual = "colocar";
   destruirPanzoom();
   document.getElementById("btnEdicao").classList.add("ativo");
   document.getElementById("modoEdBadge").classList.remove("hidden");
-  document.getElementById("modoEdBadgeTexto").textContent = "📍  Clique no mapa para posicionar o extintor";
+  document.getElementById("modoEdBadgeTexto").textContent = "Clique no mapa para posicionar o extintor";
   document.getElementById("mapaContainer").classList.add("modo-adicionar");
 
   criarPinFantasma();
@@ -242,33 +291,40 @@ function cancelarCadastro() {
   novoExtintorDados = null;
 }
 
-/* Pin fantasma que segue o cursor */
+/* ── PIN FANTASMA (mousemove com RAF) ── */
 function criarPinFantasma() {
   if (pinFantasma) pinFantasma.remove();
   pinFantasma = document.createElement("div");
   pinFantasma.className = "ponto fantasma verde";
-  pinFantasma.style.zIndex   = "100";
-  pinFantasma.style.pointerEvents = "none";
-  pinFantasma.style.position = "absolute";
-  pinFantasma.style.display  = "none";
+  Object.assign(pinFantasma.style, {
+    zIndex: "100", pointerEvents: "none",
+    position: "absolute", display: "none", willChange: "left, top"
+  });
   document.getElementById("mapa").appendChild(pinFantasma);
 }
 
+let _pinRaf = null;
 document.getElementById("mapaContainer").addEventListener("mousemove", e => {
   if (modoAtual !== "colocar" || !pinFantasma) return;
   const rect = document.getElementById("mapa").getBoundingClientRect();
-  const x    = e.clientX - rect.left;
-  const y    = e.clientY - rect.top;
-  pinFantasma.style.display = "block";
-  pinFantasma.style.left    = x + "px";
-  pinFantasma.style.top     = y + "px";
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  if (!_pinRaf) {
+    _pinRaf = requestAnimationFrame(() => {
+      pinFantasma.style.display = "block";
+      pinFantasma.style.left    = x + "px";
+      pinFantasma.style.top     = y + "px";
+      _pinRaf = null;
+    });
+  }
 });
 
 document.getElementById("mapaContainer").addEventListener("mouseleave", () => {
   if (pinFantasma) pinFantasma.style.display = "none";
 });
 
-/* Clique no mapa para posicionar */
+/* ── COLOCAR EXTINTOR ── */
 document.getElementById("mapa").addEventListener("click", e => {
   if (modoAtual !== "colocar" || !novoExtintorDados) return;
   if (e.target.closest(".ponto:not(.fantasma)")) return;
@@ -277,7 +333,6 @@ document.getElementById("mapa").addEventListener("click", e => {
   const x    = Math.round(e.clientX - rect.left);
   const y    = Math.round(e.clientY - rect.top);
 
-  // Cria o extintor com os dados preenchidos
   const id = proximoId++;
   dados[id]    = { ...novoExtintorDados };
   posicoes[id] = { top: y + "px", left: x + "px" };
@@ -285,14 +340,13 @@ document.getElementById("mapa").addEventListener("click", e => {
 
   if (pinFantasma) { pinFantasma.remove(); pinFantasma = null; }
 
-  salvarStorage();
+  salvarStorageImediato();
   renderPonto(id);
   atualizarStats();
 
-  // Após colocar, entra automaticamente no modo mover
   modoAtual = "mover";
   document.getElementById("mapaContainer").classList.remove("modo-adicionar");
-  document.getElementById("modoEdBadgeTexto").textContent = "✏️  Modo mover — arraste os extintores";
+  document.getElementById("modoEdBadgeTexto").textContent = "Modo mover — arraste os extintores";
 
   toast(`Extintor #${id} posicionado! Arraste para ajustar se precisar.`, "ok");
 });
@@ -311,10 +365,15 @@ function sairModoEdicao() {
 
 /* ── PAINEL ── */
 function abrirPainel(id) {
+  // Remove selecionado do anterior sem querySelectorAll
+  if (idAtivo !== null) {
+    const prev = pontoEls.get(String(idAtivo));
+    if (prev) prev.classList.remove("selecionado");
+  }
+
   idAtivo = id;
-  document.querySelectorAll(".ponto").forEach(p => p.classList.remove("selecionado"));
-  const pEl = document.getElementById("p" + id);
-  if (pEl) pEl.classList.add("selecionado");
+  const el = pontoEls.get(String(id));
+  if (el) el.classList.add("selecionado");
 
   const ext    = dados[id];
   const status = calcularStatus(ext.validade);
@@ -336,9 +395,12 @@ function abrirPainel(id) {
 }
 
 function fecharPainel() {
+  if (idAtivo !== null) {
+    const el = pontoEls.get(String(idAtivo));
+    if (el) el.classList.remove("selecionado");
+  }
   idAtivo = null;
   document.getElementById("detailPanel").classList.add("hidden");
-  document.querySelectorAll(".ponto").forEach(p => p.classList.remove("selecionado"));
 }
 
 function salvarEdicao() {
@@ -348,8 +410,11 @@ function salvarEdicao() {
   dados[idAtivo].tipo     = document.getElementById("editTipo").value;
   dados[idAtivo].validade = val;
   dados[idAtivo].setor    = document.getElementById("editSetor").value.trim() || dados[idAtivo].setor;
-  salvarStorage();
-  renderizarPontos();
+  salvarStorageImediato();
+  // Atualiza só o ponto afetado, não todos
+  atualizarPonto(idAtivo);
+  atualizarStats();
+  // Atualiza o painel sem fechar
   abrirPainel(idAtivo);
   if (viewAtual === "lista") renderizarLista();
   toast("Extintor atualizado!", "ok");
@@ -360,8 +425,9 @@ function trocarValidade() {
   const nova = new Date();
   nova.setFullYear(nova.getFullYear() + 1);
   dados[idAtivo].validade = nova.toISOString().split("T")[0];
-  salvarStorage();
-  renderizarPontos();
+  salvarStorageImediato();
+  atualizarPonto(idAtivo);
+  atualizarStats();
   abrirPainel(idAtivo);
   if (viewAtual === "lista") renderizarLista();
   toast("Recarga registrada! Válido por mais 1 ano.", "ok");
@@ -372,15 +438,27 @@ function removerExtintor() {
   if (!confirm(`Remover o Extintor #${idAtivo}?`)) return;
   const id = idAtivo;
   fecharPainel();
+  // Remove o elemento diretamente pelo Map — sem querySelectorAll
+  const el = pontoEls.get(String(id));
+  if (el) el.remove();
+  pontoEls.delete(String(id));
   delete dados[id];
   delete posicoes[id];
-  salvarStorage();
-  renderizarPontos();
+  salvarStorageImediato();
+  atualizarStats();
   if (viewAtual === "lista") renderizarLista();
   toast(`Extintor #${id} removido`, "warn");
 }
 
-/* ── LISTA ── */
+/* ── LISTA (com debounce na busca) ── */
+let _listaTimer = null;
+function filtrarLista(v) {
+  clearTimeout(_listaTimer);
+  _listaTimer = setTimeout(() => {
+    if (viewAtual === "lista") renderizarLista(v);
+  }, 150);
+}
+
 function renderizarLista(filtro = "") {
   const c   = document.getElementById("listaContainer");
   const ids = Object.keys(dados).filter(id => {
@@ -392,6 +470,7 @@ function renderizarLista(filtro = "") {
     c.innerHTML = `<div style="color:var(--text3);font-size:14px;padding:20px">Nenhum extintor encontrado.</div>`;
     return;
   }
+  // Monta string HTML de uma vez — uma única operação de DOM
   c.innerHTML = ids.sort((a,b)=>+a-+b).map(id => {
     const ext = dados[id]; const status = calcularStatus(ext.validade);
     const dias = ext.validade ? diasRestantes(ext.validade) : null;
@@ -410,10 +489,6 @@ function abrirPainelLista(id) {
   document.querySelectorAll(".nav-item")[0].classList.add("active");
   document.querySelectorAll(".nav-item")[1].classList.remove("active");
   setTimeout(() => abrirPainel(id), 50);
-}
-
-function filtrarLista(v) {
-  if (viewAtual === "lista") renderizarLista(v);
 }
 
 /* ── TOAST ── */
