@@ -2,39 +2,91 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Controle de Extintores</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
-
-  <!-- Zoom -->
   <script src="https://unpkg.com/@panzoom/panzoom/dist/panzoom.min.js"></script>
 </head>
 <body>
 
-<h2>🔥 Controle de Extintores</h2>
+<!-- TOAST -->
+<div id="toast"></div>
 
-<div class="topo">
-  <button onclick="toggleEdicao()">Modo edição</button>
-  <button onclick="salvar()">Salvar posições</button>
+<!-- HEADER -->
+<header>
+  <div class="header-left">
+    <span class="logo-icon">🔥</span>
+    <div>
+      <h1>CONTROLE DE EXTINTORES</h1>
+      <span class="subtitle">Sistema de Monitoramento de Segurança</span>
+    </div>
+  </div>
+  <div class="stats-bar">
+    <div class="stat">
+      <span class="stat-num" id="statTotal">0</span>
+      <span class="stat-label">TOTAL</span>
+    </div>
+    <div class="stat ok">
+      <span class="stat-num" id="statOk">0</span>
+      <span class="stat-label">OK</span>
+    </div>
+    <div class="stat warn">
+      <span class="stat-num" id="statWarn">0</span>
+      <span class="stat-label">VENCENDO</span>
+    </div>
+    <div class="stat danger">
+      <span class="stat-num" id="statExp">0</span>
+      <span class="stat-label">VENCIDOS</span>
+    </div>
+  </div>
+</header>
+
+<!-- TOOLBAR -->
+<div class="toolbar">
+  <div class="toolbar-left">
+    <button id="btnEdicao" class="btn" onclick="toggleEdicao()">
+      <span>✏️</span> Modo Edição
+    </button>
+    <button class="btn btn-ghost" onclick="resetZoom()">
+      <span>🔍</span> Resetar Zoom
+    </button>
+    <button class="btn btn-ghost" onclick="exportarRelatorio()">
+      <span>📋</span> Exportar Relatório
+    </button>
+  </div>
+  <div class="toolbar-right">
+    <div id="modoLabel" class="modo-badge hidden">✏️ MODO EDIÇÃO — Clique no mapa para adicionar • Arraste os pontos</div>
+  </div>
 </div>
 
-<div class="container">
+<!-- MAIN -->
+<div class="main">
 
+  <!-- MAPA -->
   <div id="mapaContainer">
     <div id="mapa">
-
-      <img src="imagens/galpaoA.png">
-
-      <div id="p1" class="ponto" style="top: 100px; left: 200px;" onclick="abrir(1)"></div>
-      <div id="p2" class="ponto" style="top: 250px; left: 400px;" onclick="abrir(2)"></div>
-
+      <img src="imagens/galpaoA.png" alt="Planta do Galpão A" draggable="false">
+      <!-- pontos gerados pelo JS -->
     </div>
   </div>
 
-  <div id="infoBox" class="hidden"></div>
+  <!-- PAINEL LATERAL -->
+  <div id="painel" class="painel fechado">
+    <button class="fechar-painel" onclick="fecharPainel()">✕</button>
+    <div id="painelConteudo"></div>
+  </div>
 
 </div>
 
-<script src="script.js"></script>
+<!-- LEGENDA -->
+<div class="legenda">
+  <span class="leg-item"><span class="leg-dot verde-dot"></span> Dentro da validade</span>
+  <span class="leg-item"><span class="leg-dot amarelo-dot pulse-amarelo"></span> Vence em até 30 dias</span>
+  <span class="leg-item"><span class="leg-dot vermelho-dot pulse-vermelho"></span> Vencido</span>
+</div>
 
+<script src="script.js"></script>
 </body>
 </html>
